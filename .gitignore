@@ -1,0 +1,39 @@
+# Build artifacts
+*.o
+code/collect_all
+code/test_config
+code/bf2-collector
+
+# Test / device output
+*.csv
+*.txt
+
+# Documents excluded from the repo (kept locally)
+*.pdf
+Smart/
+papers_txt/
+.claude/
+DOCA Telemetry Service Guide.md
+collect_all_TEST_PLAN.md
+候选指标.md
+Performance Monitoring Counters.md
+pathfinder-to-bf2-mapping.md
+
+# Legacy pre-refactor sources (superseded by code/collect_all.c +
+# config.c + catalog.c), kept locally for reference
+code/collect_rot.c
+code/rotate_align.py
+code/bench_sysfs.py
+code/gen_sim_rot.py
+code/main.c
+code/collect_linux.c
+code/collect_pmc.c
+code/collect_l1.c
+code/collect_l2.c
+code/collect_mem.c
+code/collect_net.c
+code/collect_pcie.c
+code/collect_dma.c
+code/collect_tilenet.c
+code/cpu_monitor.c
+code/bf2_collector.h

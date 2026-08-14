@@ -1,0 +1,10 @@
+* text=auto
+
+# LF everywhere for source and docs (BF2 gcc, shell tooling)
+*.c    text eol=lf
+*.h    text eol=lf
+*.md   text eol=lf
+*.conf text eol=lf
+*.py   text eol=lf
+Makefile text eol=lf
+LICENSE  text eol=lf
