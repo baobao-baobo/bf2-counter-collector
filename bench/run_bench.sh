@@ -2,6 +2,12 @@
 # run_bench.sh - one benchmark run: collector + bench, synchronized
 #
 # usage: sudo ./run_bench.sh <bench_id> [run_no]
+#   b1 = stress-ng --cpu 8      (compute)         [v1 axis]
+#   b2 = STREAM loop            (mixed bandwidth) [v1 axis]
+#   b3 = memrand -s 1024        (random access)   [v1 axis]
+#   b4 = stress-ng --cache 8    (cache thrash)    [v1 axis]
+# v1 axis: b1-b4 all use bench_v1_axis.conf (fixed 4-counter group);
+# the first figure plots A72_ACCESS per second, x-axis = bench.
 #   p1 = stress-ng --cpu 8      (CPU compute pressure)
 #   p3 = STREAM loop            (sequential memory bandwidth)
 #   p4 = memrand -s 1024        (random access, 1GB working set)
@@ -27,6 +33,14 @@ OUT="results/${BENCH}_run${RUN}.csv"
 mkdir -p results
 
 case "$BENCH" in
+  b1) CONF=configs/bench_v1_axis.conf
+      CMD="bin/stress-ng --cpu 8 --timeout 60s > results/${BENCH}_run${RUN}_stressng.txt 2>&1" ;;
+  b2) CONF=configs/bench_v1_axis.conf
+      CMD="i=0; while [ \$i -lt 15 ]; do bin/stream >> results/${BENCH}_run${RUN}_stream.txt; i=\$((i+1)); done" ;;
+  b3) CONF=configs/bench_v1_axis.conf
+      CMD="bin/memrand -s 1024 -b 64 -d 60 > results/${BENCH}_run${RUN}_memrand.txt 2>&1" ;;
+  b4) CONF=configs/bench_v1_axis.conf
+      CMD="bin/stress-ng --cache 8 --timeout 60s > results/${BENCH}_run${RUN}_stressng.txt 2>&1" ;;
   p1) CONF=configs/bench_p1_cpu.conf
       CMD="bin/stress-ng --cpu 8 --timeout 60s > results/${BENCH}_run${RUN}_stressng.txt 2>&1" ;;
   p3) CONF=configs/bench_p3_stream.conf
@@ -41,7 +55,7 @@ case "$BENCH" in
       CMD="bin/fio --name=t --filename=/tmp/fio.tmp --rw=read --bs=128k --size=4G --numjobs=4 --runtime=60 --time_based --direct=1 > results/${BENCH}_run${RUN}_fio.txt 2>&1" ;;
   p7) CONF=configs/bench_p7_net.conf
       CMD="bin/iperf3 -c $IPERF_SERVER -t 60 > results/${BENCH}_run${RUN}_iperf.txt 2>&1" ;;
-  *) echo "unknown bench: $BENCH (use p1 p3 p4 p5 p6 p7)"; exit 1 ;;
+  *) echo "unknown bench: $BENCH (use b1 b2 b3 b4, p1 p3 p4 p5 p6 p7)"; exit 1 ;;
 esac
 
 # sanity: config must resolve before we start the 70 s window

@@ -30,6 +30,27 @@ bench/
    （x86 主机/另一台机器）跑 `iperf3 -s`；对端也需要一份本套件里的
    iperf3（静态 aarch64）或自装。
 
+## v1 横轴试运行（b1–b4，固定计数器组）
+
+固定一组 tile 计数器（A72_ACCESS, MEMORY_READS, MEMORY_WRITES,
+HNF_REQUESTS；单组无轮换，**每秒全采**），用 **4 个不同的 bench**
+各跑 3 次（run 1..3）：
+
+```bash
+sudo ./run_bench.sh b1 1   # stress-ng --cpu 8（计算）
+sudo ./run_bench.sh b2 1   # STREAM（混合顺序带宽）
+sudo ./run_bench.sh b3 1   # memrand 1GB（随机访存）
+sudo ./run_bench.sh b4 1   # stress-ng --cache 8（cache 抖动）
+```
+
+所有 b1–b4 共用 `configs/bench_v1_axis.conf`，产出
+`results/b<N>_run<R>.csv`。
+
+**第一张图（数据回传后本地画）**：x 轴 = b1..b4（4 根柱），
+y 轴 = A72_ACCESS 每秒均值（裁首尾各 5 行后 `mean()`，3 次取
+中位）。同批采集的 MEMORY_READS/WRITES、HNF_REQUESTS 留作后续
+读写对比，不再重新跑。
+
 ## 运行矩阵
 
 每个 bench 跑 **3 次**（run 1..3），后处理取中位数：
