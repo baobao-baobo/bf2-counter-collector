@@ -37,3 +37,10 @@ code/collect_dma.c
 code/collect_tilenet.c
 code/cpu_monitor.c
 code/bf2_collector.h
+
+# Bench kit: source trees stay local (static binaries need no rebuild);
+# transfer tarballs and device-side results are not repo material
+bench/src/
+bench/results/
+bench.tar.gz
+bench-bin.tar.gz
