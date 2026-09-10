@@ -572,6 +572,189 @@ static void test_tile_errors(void)
     CHECK(cfg.tile.n_groups == 1);
 }
 
+static void test_l3_rotation(void)
+{
+    bf2_config_t cfg;
+    char err[CFG_ERR_MAX];
+    char *hdr;
+
+    /* three groups, HITS pair duplicated across groups 0 and 2 */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = CYCLES, TOTAL_RD_REQ_IN, "
+                        "HITS_BANK0, HITS_BANK1\n"
+                        "group1 = MISSES_BANK0, MISSES_BANK1, "
+                        "ALLOCATIONS_BANK0, ALLOCATIONS_BANK1\n"
+                        "group2 = EVICTIONS_BANK0, EVICTIONS_BANK1, "
+                        "HITS_BANK0, HITS_BANK1\n",
+                        &cfg, err, sizeof(err)) == 0);
+    CHECK(cfg.l3cache.n_l3_rot_cols == 6);
+    CHECK(strcmp(cfg.l3cache.l3_rot_cols[0].name, "cycles") == 0);
+    CHECK(cfg.l3cache.l3_rot_cols[0].mask == 1);
+    CHECK(strcmp(cfg.l3cache.l3_rot_cols[2].name, "hits") == 0);
+    CHECK(cfg.l3cache.l3_rot_cols[2].mask == (1 << 0 | 1 << 2));
+    CHECK(cfg.l3cache.l3_rot_cols[2].n_slots[0] == 2);
+    CHECK(cfg.l3cache.l3_rot_cols[2].slot[0][0] == 2);
+    CHECK(cfg.l3cache.l3_rot_cols[2].slot[0][1] == 3);
+    CHECK(cfg.l3cache.l3_rot_cols[2].slot[2][0] == 2);
+    CHECK(cfg.l3cache.l3_rot_cols[2].slot[2][1] == 3);
+    hdr = render_header(&cfg);
+    CHECK(hdr != NULL);
+    if (hdr != NULL) {
+        CHECK(strstr(hdr, ",l3_group,") != NULL);
+        CHECK(strstr(hdr,
+                     "l3half0_hits,l3half0_misses,l3half0_allocations,"
+                     "l3half0_evictions") != NULL);
+        CHECK(strstr(hdr, "l3half0_hits_bank0") == NULL);
+        free(hdr);
+    }
+
+    /* single bank only -> full lowercase name, no merge */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = HITS_BANK0, CYCLES, "
+                        "TOTAL_RD_REQ_IN, TOTAL_WR_REQ_IN\n",
+                        &cfg, err, sizeof(err)) == 0);
+    CHECK(cfg.l3cache.n_l3_rot_cols == 4);
+    CHECK(strcmp(cfg.l3cache.l3_rot_cols[0].name, "hits_bank0") == 0);
+
+    /* errors: bank pair split across groups */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = HITS_BANK0, CYCLES, "
+                        "TOTAL_RD_REQ_IN, TOTAL_WR_REQ_IN\n"
+                        "group1 = HITS_BANK1, TOTAL_WR_DATA_IN, "
+                        "TOTAL_WR_COMP, TOTAL_RD_DATA_OUT\n",
+                        &cfg, err, sizeof(err)) == -1);
+    CHECK(strstr(err, "same group") != NULL);
+
+    /* unequal group sizes */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = CYCLES, TOTAL_RD_REQ_IN, "
+                        "TOTAL_WR_REQ_IN, TOTAL_WR_DBID_ACK\n"
+                        "group1 = TOTAL_WR_DATA_IN, TOTAL_WR_COMP, "
+                        "TOTAL_RD_DATA_OUT\n",
+                        &cfg, err, sizeof(err)) == -1);
+    CHECK(strstr(err, "equal") != NULL);
+
+    /* gap: group0 + group2 */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = CYCLES, TOTAL_RD_REQ_IN, "
+                        "TOTAL_WR_REQ_IN, TOTAL_WR_DBID_ACK\n"
+                        "group2 = TOTAL_WR_DATA_IN, TOTAL_WR_COMP, "
+                        "TOTAL_RD_DATA_OUT, TOTAL_RD_REQ_OUT\n",
+                        &cfg, err, sizeof(err)) == -1);
+    CHECK(strstr(err, "contiguous") != NULL);
+
+    /* duplicate within group */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = CYCLES, CYCLES, "
+                        "TOTAL_RD_REQ_IN, TOTAL_WR_REQ_IN\n",
+                        &cfg, err, sizeof(err)) == -1);
+    CHECK(strstr(err, "duplicate event") != NULL);
+
+    /* unknown event */
+    CHECK(parse_resolve("[l3cache]\n"
+                        "group0 = CYCLES, NOPE, "
+                        "TOTAL_RD_REQ_IN, TOTAL_WR_REQ_IN\n",
+                        &cfg, err, sizeof(err)) == -1);
+    CHECK(strstr(err, "not in catalog") != NULL);
+}
+
+/* Paper-52 configuration: load the shipped configs/paper52.conf and
+ * require the exact 65-column header (drift gate, same role as the
+ * parity gate above).  Skipped when the config file is not present. */
+static void test_paper52(void)
+{
+    static const char *paths[] = { "../configs/paper52.conf",
+                                   "configs/paper52.conf" };
+    static const char *expected =
+        "timestamp,tile_group,"
+        "tile_a72_access,tile_a72_read,tile_a72_write,tile_rnf_requests,"
+        "tile_io_access,tile_io_reads,tile_io_write,tile_tso_write,"
+        "tile_req_buf_empty,tile_hnf_requests,tile_dir_hit,tile_allocate,"
+        "tile_victim,tile_poc_fail,tile_poc_success,tile_poc_writes,"
+        "tile_poc_reads,tile_mem_reads,tile_mem_writes,"
+        "tile_memory_reads_bypass,tile_victim_write,tile_mss_nocredit,"
+        "l3_group,"
+        "l3half0_cycles,l3half0_total_rd_req_in,l3half0_total_wr_req_in,"
+        "l3half0_total_wr_dbid_ack,l3half0_total_wr_data_in,"
+        "l3half0_total_wr_comp,l3half0_total_rd_data_out,"
+        "l3half0_total_rd_req_out,l3half0_total_wr_req_out,"
+        "l3half0_total_rd_res_in,l3half0_total_cdn_req_in,"
+        "l3half0_total_ddn_req_in,l3half0_total_emem_rd_res_in,"
+        "l3half0_total_cache_rd_res_in,l3half0_total_emem_rd_req,"
+        "l3half0_total_emem_wr_req,l3half0_hits,l3half0_misses,"
+        "l3half0_allocations,l3half0_evictions,"
+        "l3half1_cycles,l3half1_total_rd_req_in,l3half1_total_wr_req_in,"
+        "l3half1_total_wr_dbid_ack,l3half1_total_wr_data_in,"
+        "l3half1_total_wr_comp,l3half1_total_rd_data_out,"
+        "l3half1_total_rd_req_out,l3half1_total_wr_req_out,"
+        "l3half1_total_rd_res_in,l3half1_total_cdn_req_in,"
+        "l3half1_total_ddn_req_in,l3half1_total_emem_rd_res_in,"
+        "l3half1_total_cache_rd_res_in,l3half1_total_emem_rd_req,"
+        "l3half1_total_emem_wr_req,l3half1_hits,l3half1_misses,"
+        "l3half1_allocations,l3half1_evictions\n";
+    bf2_config_t cfg;
+    char err[CFG_ERR_MAX];
+    const char *found = NULL;
+    FILE *fp = NULL;
+    char *hdr;
+    int i, c;
+
+    for (i = 0; i < 2 && found == NULL; i++) {
+        fp = fopen(paths[i], "r");
+        if (fp != NULL) {
+            found = paths[i];
+            fclose(fp);
+        }
+    }
+    if (found == NULL) {
+        printf("NOTE: configs/paper52.conf not found, skipping\n");
+        return;
+    }
+    config_set_defaults(&cfg);
+    CHECK(config_parse_file(found, &cfg, err, sizeof(err)) == 0);
+    CHECK(config_resolve(&cfg, err, sizeof(err)) == 0);
+    CHECK(cfg.tile.n_groups == 6 && cfg.tile.n_tile_cols == 22);
+    CHECK(cfg.l3cache.n_groups == 8 && cfg.l3cache.n_l3_rot_cols == 20);
+
+    /* repeated events keep full coverage across the rotation */
+    {
+        int a72 = -1, mrd = -1;
+
+        for (c = 0; c < cfg.tile.n_tile_cols; c++) {
+            if (strcmp(cfg.tile.tile_cols[c].name, "a72_access") == 0)
+                a72 = c;
+            if (strcmp(cfg.tile.tile_cols[c].name, "mem_reads") == 0)
+                mrd = c;
+        }
+        CHECK(a72 >= 0 &&
+              cfg.tile.tile_cols[a72].mask == (1 << 0 | 1 << 5));
+        CHECK(mrd >= 0 &&
+              cfg.tile.tile_cols[mrd].mask == (1 << 4 | 1 << 5));
+    }
+    {
+        int hits = -1;
+
+        for (c = 0; c < cfg.l3cache.n_l3_rot_cols; c++)
+            if (strcmp(cfg.l3cache.l3_rot_cols[c].name, "hits") == 0)
+                hits = c;
+        CHECK(hits >= 0 &&
+              cfg.l3cache.l3_rot_cols[hits].mask == (1 << 5 | 1 << 7));
+    }
+
+    /* disabled blocks stay out of the header */
+    CHECK(!cfg.tilenet.enabled && !cfg.trio.enabled && !cfg.smmu.enabled &&
+          !cfg.triogen.enabled && !cfg.pcie.enabled && !cfg.l1.enabled &&
+          !cfg.cpu.enabled && !cfg.mem.enabled && !cfg.net.enabled &&
+          !cfg.gic.enabled);
+
+    hdr = render_header(&cfg);
+    CHECK(hdr != NULL);
+    if (hdr != NULL) {
+        CHECK_STR(hdr, expected);
+        free(hdr);
+    }
+}
+
 static void test_net_ifaces(void)
 {
     bf2_config_t cfg;
@@ -602,6 +785,8 @@ int main(void)
     test_l3_pair_rule();
     test_l1_subset();
     test_tile_errors();
+    test_l3_rotation();
+    test_paper52();
     test_net_ifaces();
 
     remove("test_tmp.conf");   /* don't leave the scratch file behind */

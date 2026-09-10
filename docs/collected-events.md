@@ -8,12 +8,13 @@
 | 2026-08-13 | 修订为 collect_all.c 与 unified bf2-collector 对照表 |
 | 2026-08-14 | 精简为 collect_all.c 专用：计数器分类总表，与采集工具配套          |
 | 2026-08-14 | 工具改为配置文件驱动：采集范围与频率由 `configs/default.conf` 等 INI 配置 |
+| 2026-09-10 | 新增 L3 轮换模式（`[l3cache] groupN`）与 `configs/paper52.conf`：精确采集论文 52 计数器 |
 
 依据文档：NVIDIA BlueField-2 Performance Monitoring Counters v4.15.0 (GenBF2+)。事件编码已从源码硬编码迁移至事件目录 `code/catalog.c`（`--list-events` 可查看全量）。
 
 ## 1 采集工具 collect_all
 
-实现代码：`code/`（collect_all.c + config.c + catalog.c）。单进程整合采集器，每 tick 输出一行 CSV，覆盖全部关注硬件块。**采集哪些 counter、以什么频率采集，全部由 INI 配置文件决定**（`-c configs/default.conf`；不带 `-c` 使用内置默认，即下文的已验证基线）。tile HNF 每 tile 仅 4 个计数器槽，采用多组事件轮换（时分复用）；其余硬件块持续采集。
+实现代码：`code/`（collect_all.c + config.c + catalog.c）。单进程整合采集器，每 tick 输出一行 CSV，覆盖全部关注硬件块。**采集哪些 counter、以什么频率采集，全部由 INI 配置文件决定**（`-c configs/default.conf`；不带 `-c` 使用内置默认，即下文的已验证基线）。tile HNF 每 tile 仅 4 个计数器槽，采用多组事件轮换（时分复用）；l3cache 每 half 4 个槽，默认平面模式（≤4 事件持续采集），配置 `groupN` 时同样进入轮换模式（与 tile 同规则）；其余硬件块持续采集。
 
 - 构建（设备本机）：`make`；交叉编译：`make CROSS=aarch64-linux-gnu-`
 - 运行：`sudo ./collect_all -c configs/default.conf [-i 秒] [-d 秒] [-o 文件] [-q]`
@@ -46,6 +47,7 @@ net_rx_bytes,net_tx_bytes
 - `[global] interval`：基础 tick（秒），每 tick 一行；`duration=0` 永久。
 - 各块 `interval` 必须为 global 的整数倍（0/缺省 = 继承）；未采样 tick 该块列留空（pandas 读为 NaN），每段窗口（含首个）恰为 k 个 tick。
 - `[tile] groupN`：轮换组，每组 ≤4 事件且组间等长；首个 `groupN` 键清空默认组。
+- `[l3cache] groupN`：与 tile 同规则的轮换模式（组连续、等长、每组 ≤4）；轮换模式下所有 `_BANK0/_BANK1` 事件对合并成每 half 一列（如 `total_cdn_req_in`），且 bank 对必须编在同一组（resolve 校验）；输出另加 `l3_group` 标记列。论文 52 计数器完整配置见 `configs/paper52.conf`（tile 6 组 + l3cache 8 组）。
 - 各块首个 `events=`/`registers=` 键清空该块默认列表；未出现则保持默认。
 - L3 同时选 HITS_BANK0+BANK1 → 合并列 `l3half{i}_hits`（MISSES 同理）；PCIe 同选 IN_P/NP/C_BYTE_CNT → 合并 `pcie{i}_rx_bytes`（OUT_ 同理），PKT 寄存器永不合并且逐寄存器列。
 - `[gic]` 默认禁用：SMGEN 事件与 SMMU 共用，gic 目录尚未实机验证，确认 `gicN` 命名后再启用。
@@ -104,6 +106,7 @@ net_rx_bytes,net_tx_bytes
 - Tile HNF 轮换组（默认）：G0 = A72_ACCESS + MEMORY_READS + MEMORY_WRITES + MSS_NO_CREDIT；G1 = A72_ACCESS + DIR_HIT + ALLOCATE + VICTIM_WRITE。A72_ACCESS 编入两组（覆盖 100%），其余 6 事件覆盖 50%。tile_group 列标记当前行所属组。
 - 未覆盖事件字段留空（读取为 NaN），不以 0 占位，因 0 为真实计数值（例如 mss_nocredit=0 表示无背压）。
 - L3 enable 门控：enable=1 复位并启动全部计数器，enable=0 冻结；冻结后的读数即为窗口增量，无需差分。L3 窗口与 tile 轮换窗口对齐。无 enable 文件的 half 自动退化为差分模式。
+- L3 轮换模式（groupN 配置）：冻结 → 读当前组 → **冻结期间**编程下一组 → enable 重启；每个窗口恰覆盖一个组，完整轮换周期 = 组数 × tick。合并列（bank 对）在当前窗口有值，其余组列留空（NaN），`l3_group` 列标记当前组。
 - 后处理建议：pandas resample('60s').mean()（skipna）自动得到覆盖加权均值。
 
 ## 5 验证状态

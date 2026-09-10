@@ -480,7 +480,7 @@ int config_parse_file(const char *path, bf2_config_t *cfg,
             if (kid == KEY_ENABLED || kid == KEY_INTERVAL) {
                 /* common to all blocks */
             } else if (kid >= KEY_GROUP0 &&
-                       cur_sec == SEC_TILE) {
+                       (cur_sec == SEC_TILE || cur_sec == SEC_L3)) {
                 /* ok */
             } else if (kid == KEY_EVENTS && (cur_sec == SEC_TILENET ||
                        cur_sec == SEC_TRIO || cur_sec == SEC_SMMU ||
@@ -776,6 +776,176 @@ static void resolve_l3(cfg_block_t *b)
     b->n_l3_cols = ncols;
 }
 
+/* ---- L3 rotation mode (groupN keys present): mirror the tile rules ---- */
+
+/* Length of the base name for a trailing _BANK0/_BANK1 suffix, else 0. */
+static int bank_base_len(const char *name)
+{
+    int len = (int)strlen(name);
+
+    if (len > 6 && strcmp(name + len - 6, "_BANK0") == 0)
+        return len - 6;
+    if (len > 6 && strcmp(name + len - 6, "_BANK1") == 0)
+        return len - 6;
+    return 0;
+}
+
+/* Copy src[0..len-1] lowercased into dst (NUL-terminated). */
+static void copy_name_lower(char *dst, const char *src, int len)
+{
+    int i;
+
+    for (i = 0; i < len && i < CFG_NAME_MAX - 1; i++)
+        dst[i] = (char)tolower((unsigned char)src[i]);
+    dst[i] = '\0';
+}
+
+/* Partner name: the same event on the other bank. */
+static void bank_partner(const char *name, char *buf, size_t bufsz)
+{
+    int bl = bank_base_len(name);
+
+    snprintf(buf, bufsz, "%.*s_BANK%s", bl, name,
+             name[bl + 5] == '0' ? "1" : "0");
+}
+
+static int group_has(const cfg_block_t *b, int g, const char *name)
+{
+    int s;
+
+    for (s = 0; s < b->n_group_ev[g]; s++)
+        if (strcmp(b->groups[g][s].name, name) == 0)
+            return 1;
+    return 0;
+}
+
+static int any_group_has(const cfg_block_t *b, const char *name)
+{
+    int g;
+
+    for (g = 0; g < b->n_groups; g++)
+        if (group_has(b, g, name))
+            return 1;
+    return 0;
+}
+
+/*
+ * Rotation mode resolve: validate the groups (contiguous, equal size,
+ * catalog membership, no duplicates within a group), enforce that
+ * _BANK0/_BANK1 partner events share a group (they merge into one
+ * column per half), then build the column table -- one column per
+ * merged bank pair or unpaired event.  A column is filled in every
+ * window whose group contains it (mask), summing its slots.
+ */
+static int resolve_l3_rot(cfg_block_t *b, char *errbuf, size_t errsz)
+{
+    int g, s, i;
+    int ncols = 0;
+
+    for (g = 0; g < b->n_groups; g++) {
+        if (b->n_group_ev[g] < 1) {
+            snprintf(errbuf, errsz,
+                     "[l3cache] groups must be contiguous: group%d is empty",
+                     g);
+            return -1;
+        }
+        if (b->n_group_ev[g] != b->n_group_ev[0]) {
+            snprintf(errbuf, errsz,
+                     "[l3cache] group sizes must be equal (group0 has %d, "
+                     "group%d has %d)", b->n_group_ev[0], g,
+                     b->n_group_ev[g]);
+            return -1;
+        }
+        for (s = 0; s < b->n_group_ev[g]; s++) {
+            cfg_event_t *ev = &b->groups[g][s];
+            const catalog_event_t *ce =
+                catalog_find_event("l3cache", ev->name);
+            int j;
+
+            if (ce == NULL) {
+                snprintf(errbuf, errsz,
+                         "[l3cache] event '%s' not in catalog "
+                         "(see --list-events)", ev->name);
+                return -1;
+            }
+            for (j = 0; j < s; j++) {
+                if (strcmp(b->groups[g][j].name, ev->name) == 0) {
+                    snprintf(errbuf, errsz,
+                             "[l3cache] duplicate event '%s' in group%d",
+                             ev->name, g);
+                    return -1;
+                }
+            }
+            ev->code = (int)ce->code;
+            snprintf(ev->colname, CFG_NAME_MAX, "%s",
+                     catalog_colname(ce));
+        }
+    }
+
+    /* bank pairs merge into one column: both banks must share a group */
+    for (g = 0; g < b->n_groups; g++) {
+        for (s = 0; s < b->n_group_ev[g]; s++) {
+            const char *nm = b->groups[g][s].name;
+            char partner[CFG_NAME_MAX];
+
+            if (bank_base_len(nm) == 0)
+                continue;
+            bank_partner(nm, partner, sizeof(partner));
+            if (any_group_has(b, partner) && !group_has(b, g, partner)) {
+                snprintf(errbuf, errsz,
+                         "[l3cache] %s and %s merge into one column and "
+                         "must be in the same group (group%d has only one)",
+                         nm, partner, g);
+                return -1;
+            }
+        }
+    }
+
+    /* build the column table: one column per merged pair / single event */
+    for (g = 0; g < b->n_groups; g++) {
+        for (s = 0; s < b->n_group_ev[g]; s++) {
+            const char *nm = b->groups[g][s].name;
+            char colname[CFG_NAME_MAX];
+            cfg_l3_rot_col_t *col = NULL;
+            char partner[CFG_NAME_MAX];
+            int bl = bank_base_len(nm);
+
+            if (bl > 0) {
+                bank_partner(nm, partner, sizeof(partner));
+                if (any_group_has(b, partner))
+                    copy_name_lower(colname, nm, bl);  /* merged base name */
+                else
+                    copy_name(colname, b->groups[g][s].colname);
+            } else {
+                copy_name(colname, b->groups[g][s].colname);
+            }
+            for (i = 0; i < ncols; i++) {
+                if (strcmp(b->l3_rot_cols[i].name, colname) == 0) {
+                    col = &b->l3_rot_cols[i];
+                    break;
+                }
+            }
+            if (col == NULL) {
+                if (ncols >= CFG_L3_COLS_MAX) {
+                    snprintf(errbuf, errsz,
+                             "[l3cache] too many unique event names "
+                             "(max %d)", CFG_L3_COLS_MAX);
+                    return -1;
+                }
+                col = &b->l3_rot_cols[ncols++];
+                copy_name(col->name, colname);
+                col->mask = 0;
+                for (i = 0; i < CFG_GROUPS_MAX; i++)
+                    col->n_slots[i] = 0;
+            }
+            col->mask |= 1 << g;
+            col->slot[g][col->n_slots[g]++] = s;
+        }
+    }
+    b->n_l3_rot_cols = ncols;
+    return 0;
+}
+
 static void resolve_pcie(cfg_block_t *b)
 {
     static const char *rx[3] = { "IN_P_BYTE_CNT", "IN_NP_BYTE_CNT",
@@ -865,6 +1035,10 @@ int config_resolve(bf2_config_t *cfg, char *errbuf, size_t errsz)
     if (resolve_block("l3cache", &cfg->l3cache, 4, cfg->interval,
                       errbuf, errsz) != 0)
         return -1;
+    if (cfg->l3cache.n_groups > 0) {
+        if (resolve_l3_rot(&cfg->l3cache, errbuf, errsz) != 0)
+            return -1;
+    }
     if (resolve_list("pcie", cfg->pcie.regs, cfg->pcie.n_regs,
                      errbuf, errsz) != 0)
         return -1;
@@ -892,7 +1066,8 @@ int config_resolve(bf2_config_t *cfg, char *errbuf, size_t errsz)
     if (resolve_k("net", &cfg->net, cfg->interval, errbuf, errsz) != 0)
         return -1;
 
-    resolve_l3(&cfg->l3cache);
+    if (cfg->l3cache.n_groups == 0)
+        resolve_l3(&cfg->l3cache);   /* flat mode (rotation skips this) */
     resolve_pcie(&cfg->pcie);
     resolve_l1(&cfg->l1);
     return 0;
@@ -1036,14 +1211,40 @@ int config_dump_resolved(FILE *fp, const bf2_config_t *cfg)
     dump_block(fp, "triogen", &cfg->triogen);
     fprintf(fp, "  fixed: triogen0=TX_DAT_AF triogen1=RX_DAT_AF\n");
     dump_block(fp, "l3cache", &cfg->l3cache);
-    dump_event_list(fp, "  ", "events", cfg->l3cache.events,
-                    cfg->l3cache.n_events);
-    fprintf(fp, "  columns:");
-    for (i = 0; i < cfg->l3cache.n_l3_cols; i++)
-        fprintf(fp, " %s(ev%d%s)", cfg->l3cache.l3_cols[i].name,
-                cfg->l3cache.l3_cols[i].ev0,
-                cfg->l3cache.l3_cols[i].ev1 >= 0 ? "+ev1" : "");
-    fprintf(fp, "\n");
+    if (cfg->l3cache.n_groups > 0) {   /* rotation mode */
+        for (g = 0; g < cfg->l3cache.n_groups; g++) {
+            char lbl[24];
+
+            snprintf(lbl, sizeof(lbl), "group%d", g);
+            dump_event_list(fp, "  ", lbl, cfg->l3cache.groups[g],
+                            cfg->l3cache.n_group_ev[g]);
+        }
+        fprintf(fp, "  columns (%d):\n", cfg->l3cache.n_l3_rot_cols);
+        for (i = 0; i < cfg->l3cache.n_l3_rot_cols; i++) {
+            const cfg_l3_rot_col_t *c = &cfg->l3cache.l3_rot_cols[i];
+            int j;
+
+            fprintf(fp, "    %s  groups:", c->name);
+            for (g = 0; g < cfg->l3cache.n_groups; g++) {
+                if (c->mask & (1 << g)) {
+                    fprintf(fp, " %d@slot", g);
+                    for (j = 0; j < c->n_slots[g]; j++)
+                        fprintf(fp, "%s%d", j ? "+" : "",
+                                c->slot[g][j]);
+                }
+            }
+            fprintf(fp, "\n");
+        }
+    } else {
+        dump_event_list(fp, "  ", "events", cfg->l3cache.events,
+                        cfg->l3cache.n_events);
+        fprintf(fp, "  columns:");
+        for (i = 0; i < cfg->l3cache.n_l3_cols; i++)
+            fprintf(fp, " %s(ev%d%s)", cfg->l3cache.l3_cols[i].name,
+                    cfg->l3cache.l3_cols[i].ev0,
+                    cfg->l3cache.l3_cols[i].ev1 >= 0 ? "+ev1" : "");
+        fprintf(fp, "\n");
+    }
     dump_block(fp, "pcie", &cfg->pcie);
     dump_event_list(fp, "  ", "registers", cfg->pcie.regs,
                     cfg->pcie.n_regs);
@@ -1147,10 +1348,19 @@ int config_write_csv_header(FILE *fp, const bf2_config_t *cfg,
     if (cfg->triogen.enabled && p->have_triogen)
         fputs(",triogen_tx_dat_af,triogen_rx_dat_af", fp);
     if (cfg->l3cache.enabled && p->have_l3) {
-        for (i = 0; i < p->n_l3halves; i++) {
-            for (u = 0; u < cfg->l3cache.n_l3_cols; u++)
-                fprintf(fp, ",l3half%d_%s", i,
-                        cfg->l3cache.l3_cols[u].name);
+        if (cfg->l3cache.n_groups > 0) {   /* rotation mode */
+            fputs(",l3_group", fp);
+            for (i = 0; i < p->n_l3halves; i++) {
+                for (u = 0; u < cfg->l3cache.n_l3_rot_cols; u++)
+                    fprintf(fp, ",l3half%d_%s", i,
+                            cfg->l3cache.l3_rot_cols[u].name);
+            }
+        } else {
+            for (i = 0; i < p->n_l3halves; i++) {
+                for (u = 0; u < cfg->l3cache.n_l3_cols; u++)
+                    fprintf(fp, ",l3half%d_%s", i,
+                            cfg->l3cache.l3_cols[u].name);
+            }
         }
     }
     if (cfg->pcie.enabled && p->have_pcie) {

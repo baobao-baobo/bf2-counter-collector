@@ -13,10 +13,11 @@
 #include "catalog.h"
 
 /* ------------------------------------------------------------------ */
-/* Tile HNF (21 events, non-reserved)                                  */
+/* Tile HNF (22 events, non-reserved)                                  */
 /* ------------------------------------------------------------------ */
 static const catalog_event_t tile_events[] = {
     { "HNF_REQUESTS",        NULL,           0x45 },
+    { "RNF_REQUESTS",        NULL,           0x4a },
     { "MEMORY_READS",        "mem_reads",    0x4c },
     { "MEMORY_WRITES",       "mem_writes",   0x4d },
     { "VICTIM_WRITE",        NULL,           0x4e },
@@ -138,9 +139,10 @@ static const catalog_event_t triogen_events[] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* L3 cache (29 events, non-reserved)                                  */
+/* L3 cache (30 events, non-reserved)                                  */
 /* ------------------------------------------------------------------ */
 static const catalog_event_t l3cache_events[] = {
+    { "CYCLES",                      NULL, 0x01 },
     { "TOTAL_RD_REQ_IN",             NULL, 0x02 },
     { "TOTAL_WR_REQ_IN",             NULL, 0x03 },
     { "TOTAL_WR_DBID_ACK",           NULL, 0x04 },

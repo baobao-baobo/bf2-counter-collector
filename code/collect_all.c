@@ -133,6 +133,7 @@ static unsigned long long g_triogen_prev[MAX_TRIOS];
 
 /* ---- L3 state ---- */
 static int   g_nl3halves = 0;
+static int   g_l3_gid = 0;   /* active rotation group (rotation mode) */
 static char  g_l3_path[MAX_L3HALVES][MAX_PATH_LEN];
 static int   g_l3_has_enable[MAX_L3HALVES];
 static unsigned long long g_l3_prev[MAX_L3HALVES][CFG_SLOTS_MAX];
@@ -593,10 +594,20 @@ static int discover_l3halves(const char *base)
     return (g_nl3halves > 0) ? 0 : -1;
 }
 
+static void program_l3_group(int gid)
+{
+    program_block_events(g_l3_path, g_nl3halves,
+                         g_cfg.l3cache.groups[gid],
+                         g_cfg.l3cache.n_group_ev[gid]);
+}
+
 static void program_l3halves(void)
 {
-    program_block_events(g_l3_path, g_nl3halves, g_cfg.l3cache.events,
-                         g_cfg.l3cache.n_events);
+    if (g_cfg.l3cache.n_groups > 0)
+        program_l3_group(g_l3_gid);
+    else
+        program_block_events(g_l3_path, g_nl3halves, g_cfg.l3cache.events,
+                             g_cfg.l3cache.n_events);
 }
 
 /* Write 1 to enable -> counters reset and start */
@@ -634,10 +645,13 @@ static void l3_disable_all(void)
 /* Baseline for halves WITHOUT an enable file (delta mode) */
 static void read_l3_baseline(void)
 {
+    int nev = (g_cfg.l3cache.n_groups > 0)
+            ? g_cfg.l3cache.n_group_ev[g_l3_gid]
+            : g_cfg.l3cache.n_events;
     int i, j;
     for (i = 0; i < g_nl3halves; i++) {
         if (g_l3_has_enable[i]) continue;
-        for (j = 0; j < g_cfg.l3cache.n_events; j++)
+        for (j = 0; j < nev; j++)
             g_l3_prev[i][j] = read_counter(g_l3_path[i], j);
     }
 }
@@ -649,7 +663,9 @@ static void read_l3_baseline(void)
  */
 static void read_l3_vals(unsigned long long vals[MAX_L3HALVES][CFG_SLOTS_MAX])
 {
-    int nev = g_cfg.l3cache.n_events;
+    int nev = (g_cfg.l3cache.n_groups > 0)
+            ? g_cfg.l3cache.n_group_ev[g_l3_gid]
+            : g_cfg.l3cache.n_events;
     int i, j;
 
     for (i = 0; i < g_nl3halves; i++) {
@@ -1166,13 +1182,36 @@ static void row_triogen(FILE *fp, int sampled,
     }
 }
 
-static void row_l3(FILE *fp, int sampled,
+static void row_l3(FILE *fp, int sampled, int l3_gid,
                    const unsigned long long vals[MAX_L3HALVES][CFG_SLOTS_MAX])
 {
     const cfg_block_t *b = &g_cfg.l3cache;
     int i, u;
 
     if (!b->enabled || g_nl3halves == 0) return;
+    if (b->n_groups > 0) {   /* rotation mode: marker + mask/slot columns */
+        if (sampled)
+            fprintf(fp, ",%d", l3_gid);
+        else
+            fprintf(fp, ",");
+        for (i = 0; i < g_nl3halves; i++) {
+            for (u = 0; u < b->n_l3_rot_cols; u++) {
+                const cfg_l3_rot_col_t *col = &b->l3_rot_cols[u];
+
+                if (sampled && (col->mask & (1 << l3_gid))) {
+                    unsigned long long v = 0;
+                    int j;
+
+                    for (j = 0; j < col->n_slots[l3_gid]; j++)
+                        v += vals[i][col->slot[l3_gid][j]];
+                    fprintf(fp, ",%llu", v);
+                } else {
+                    fprintf(fp, ",");
+                }
+            }
+        }
+        return;
+    }
     for (i = 0; i < g_nl3halves; i++) {
         for (u = 0; u < b->n_l3_cols; u++) {
             const cfg_col_t *col = &b->l3_cols[u];
@@ -1471,7 +1510,25 @@ int main(int argc, char **argv)
             program_l3halves();
             read_l3_baseline();   /* for halves without enable */
             l3_enable_all();      /* L3 window 0 starts here (enable resets) */
-            if (!g_quiet) fprintf(stderr, "[INFO] %d l3cache half(s)\n", g_nl3halves);
+            if (!g_quiet) {
+                if (g_cfg.l3cache.n_groups > 0) {
+                    int g, j;
+
+                    fprintf(stderr, "[INFO] %d l3cache half(s), groups:",
+                            g_nl3halves);
+                    for (g = 0; g < g_cfg.l3cache.n_groups; g++) {
+                        fprintf(stderr, " G%d={", g);
+                        for (j = 0; j < g_cfg.l3cache.n_group_ev[g]; j++)
+                            fprintf(stderr, "%s%s", j ? "," : "",
+                                    g_cfg.l3cache.groups[g][j].name);
+                        fprintf(stderr, "}");
+                    }
+                    fprintf(stderr, "\n");
+                } else {
+                    fprintf(stderr, "[INFO] %d l3cache half(s)\n",
+                            g_nl3halves);
+                }
+            }
         } else {
             fprintf(stderr, "[WARN] No l3cache blocks\n");
         }
@@ -1541,7 +1598,9 @@ int main(int argc, char **argv)
      *   tick N (loop body):
      *     sleep(interval)
      *     sample flags: s = (tick % k == k-1) per block
-     *     if s_l3: disable; read L3; enable     <- L3 window done
+     *     if s_l3: disable; read L3;            <- L3 window done
+     *              (rotating: program next group while frozen)
+     *              enable
      *     if s_tile: read tile delta            <- tile window done
      *     read persistent blocks (deltas) + software
      *     write row: ts, tile_group, per-block fields (empty if unsampled)
@@ -1584,12 +1643,21 @@ int main(int argc, char **argv)
         int s_gic = g_ngics > 0 && tick % k_gic == k_gic - 1;
 #undef BLK_K
 
-        /* --- L3: freeze, read, restart (only on sampled ticks) --- */
+        /* --- L3: freeze, read, restart (only on sampled ticks).  In
+         * rotation mode the next group is programmed while frozen so the
+         * enable below starts it with a clean reset. --- */
         unsigned long long l3_vals[MAX_L3HALVES][CFG_SLOTS_MAX];
+        int l3_gid = 0;   /* group whose window just closed (for the row) */
         memset(l3_vals, 0, sizeof(l3_vals));
         if (s_l3) {
             l3_disable_all();
             read_l3_vals(l3_vals);
+            l3_gid = g_l3_gid;
+            if (g_cfg.l3cache.n_groups > 0) {
+                g_l3_gid = (g_l3_gid + 1) % g_cfg.l3cache.n_groups;
+                program_l3_group(g_l3_gid);
+                read_l3_baseline();   /* halves without enable: new baseline */
+            }
             l3_enable_all();
         }
 
@@ -1639,7 +1707,7 @@ int main(int argc, char **argv)
         row_list(out_fp, &g_cfg.trio, g_have_trio, s_trio, trio_delta);
         row_list(out_fp, &g_cfg.smmu, g_nsmmus > 0, s_smmu, smmu_delta);
         row_triogen(out_fp, s_triogen, triogen_delta);
-        row_l3(out_fp, s_l3, l3_vals);
+        row_l3(out_fp, s_l3, l3_gid, l3_vals);
         row_pcie(out_fp, s_pcie, pcie_delta);
         row_l1(out_fp, s_l1, pmu_delta);
         row_cpu(out_fp, s_cpu, cpu_util, cpu_min, cpu_max, cpu_avg);

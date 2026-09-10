@@ -18,11 +18,11 @@
 #define CFG_NAME_MAX      48   /* event / interface names */
 #define CFG_PATH_MAX      512
 #define CFG_ERR_MAX       512
-#define CFG_GROUPS_MAX    8    /* tile rotation groups */
+#define CFG_GROUPS_MAX    8    /* tile / l3cache rotation groups */
 #define CFG_SLOTS_MAX     4    /* mechanism-1 programmable slots */
 #define CFG_REGS_MAX      12   /* PCIe TLR statistics registers */
 #define CFG_IFACES_MAX    8
-#define CFG_L3_COLS_MAX   8
+#define CFG_L3_COLS_MAX   32   /* rotation mode: up to 30 unique L3 events */
 #define CFG_TILE_COLS_MAX 32
 #define CFG_PCIE_UNITS_MAX 14
 
@@ -42,6 +42,13 @@ typedef struct {
     int mask;                   /* bit g = group g provides this column */
     int slot[CFG_GROUPS_MAX];   /* counter slot within each group */
 } cfg_tile_col_t;
+
+typedef struct {
+    char name[CFG_NAME_MAX];
+    int mask;                              /* bit g = group g fills this column */
+    int n_slots[CFG_GROUPS_MAX];           /* # contributing events in group g */
+    int slot[CFG_GROUPS_MAX][CFG_SLOTS_MAX]; /* event indexes within group g */
+} cfg_l3_rot_col_t;
 
 typedef struct {
     int enabled;
@@ -67,6 +74,8 @@ typedef struct {
     int rx_idx[3], tx_idx[3];   /* pcie regs[] indices, -1 = absent */
     int n_l3_cols;
     cfg_col_t l3_cols[CFG_L3_COLS_MAX];
+    int n_l3_rot_cols;                    /* rotation mode (n_groups > 0) */
+    cfg_l3_rot_col_t l3_rot_cols[CFG_L3_COLS_MAX];
     int n_tile_cols;
     cfg_tile_col_t tile_cols[CFG_TILE_COLS_MAX];
 } cfg_block_t;
