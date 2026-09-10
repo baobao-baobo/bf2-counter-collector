@@ -15,7 +15,7 @@ bench/
 │   ├── memrand            # 自研：随机访问指针追逐（替代 sysbench）
 │   ├── fio                # 3.42，存储 I/O
 │   └── iperf3             # 3.21，网络吞吐
-├── configs/               # 采集配置（paper52.conf + bench_p*.conf）
+├── configs/               # 采集配置（bench_p*.conf，分场景定向）
 ├── run_bench.sh           # 设备端一键运行脚本
 ├── src/                   # 源码（设备上有 gcc 也可原生重编）
 └── README.md
@@ -25,10 +25,8 @@ bench/
 
 1. 把整个 `bench/` 目录拷到设备（如 `/root/bench/`）；
 2. 把设备上编译好的 `collect_all` 二进制放进 `bench/`；
-3. 把 `configs/paper52.conf` 也复制到 `bench/configs/`（与仓库 configs/
-   里的同一份）；
-4. `chmod +x run_bench.sh bin/*`；
-5. p7（iperf3）需先编辑 run_bench.sh 里的 `IPERF_SERVER` 并确保对端
+3. `chmod +x run_bench.sh bin/*`；
+4. p7（iperf3）需先编辑 run_bench.sh 里的 `IPERF_SERVER` 并确保对端
    （x86 主机/另一台机器）跑 `iperf3 -s`；对端也需要一份本套件里的
    iperf3（静态 aarch64）或自装。
 
@@ -37,7 +35,6 @@ bench/
 每个 bench 跑 **3 次**（run 1..3），后处理取中位数：
 
 ```bash
-sudo ./run_bench.sh p0 1   # idle 基线（全量 52 计数器）
 sudo ./run_bench.sh p1 1   # stress-ng --cpu 8（CPU 计算压力）
 sudo ./run_bench.sh p3 1   # STREAM（内存顺序带宽）
 sudo ./run_bench.sh p4 1   # memrand（随机访存，1GB 工作集）
@@ -57,16 +54,15 @@ sudo ./run_bench.sh p7 1   # iperf3（网络，可选）
 
 | 方案 | bench | 主要观察计数器（52 内） | 采集配置 |
 |---|---|---|---|
-| P0 | idle | 全部（基线） | paper52.conf（6+8 组轮换） |
 | P1 | stress-ng --cpu | A72_ACCESS/READ/WRITE、HNF_REQUESTS、REQ_BUF_EMPTY、L3 请求管线 | bench_p1_cpu.conf |
 | P3 | STREAM | MEMORY_READS/WRITES、POC_*、MSS_NO_CREDIT、L3 EMEM_REQ/MISSES/EVICTIONS | bench_p3_stream.conf |
 | P4 | memrand 1GB | DIR_HIT、ALLOCATE、VICTIM*、L3 HITS/MISSES/ALLOCATIONS/EVICTIONS | bench_p4_memrand.conf |
 | P5 | stress-ng --cache | 同 P4 | bench_p5_cache.conf |
-| P6 | fio | IO_ACCESS/READS/WRITE、TSO_WRITE、RNF_REQUESTS + tilenet/trio/pcie 全默认启用 | bench_p6_fio.conf |
+| P6 | fio | IO_ACCESS/READS/WRITE、TSO_WRITE、RNF_REQUESTS + tilenet/trio/pcie（DMA 路径） | bench_p6_fio.conf |
 | P7 | iperf3 | A72_*、IO_*、net_rx/tx_bytes（软件） | bench_p7_net.conf |
 
-P1–P5/P7 配置为 2 组轮换（周期 2 s），每个计数器每 2 s 一个样本，
-60 s 内 ~30 样本——比全量 paper52.conf（6/8 s 周期）密得多。
+所有 bench 配置均为 2 组轮换（周期 2 s），每个计数器每 2 s 一个
+样本，60 s 内 ~30 样本。
 
 ## memrand 用法（局部性实验）
 
@@ -81,15 +77,21 @@ bin/memrand -s 512  -b 64 -d 30 -w  # 写模式
 
 ## 后处理与出图（本地）
 
-1. `tools/check_csv.py` 验证 CSV 节奏（p0 用 paper52 的周期参数，
-   其余配置 `--period 2`）；
+1. `tools/check_csv.py` 验证 CSV 节奏（`--period 2`）；
 2. pandas：读 CSV → 裁首尾 5 行 → `resample('10s').mean()`（skipna）
    → 3 次运行取中位 → 每个 bench 一行汇总；
-3. 画图（横轴 = P0..P7，仿 PathFinder Figure 2 的视觉语言）：
-   - **图 A（仿 2a/2d）**：MSS_NO_CREDIT + REQ_BUF_EMPTY 背压 cycles；
-   - **图 B（仿 2c/2f）**：L3 HITS/MISSES/EVICTIONS 堆叠柱事件分解；
-   - **图 C（仿 2b/2e）**：MEMORY_READS+WRITES 带宽速率与 L2/L3 命中率；
-   - **图 D**：~12 个代表性计数器归一化分组柱矩阵。
+3. 画图（仿 PathFinder Figure 2 的视觉语言；分场景定向采集下，跨 bench
+   对比只对多配置覆盖的计数器有效）：
+   - **图 A（仿 2a/2d）**：A72_ACCESS 跨 P1–P7 归一化分组柱——唯一在
+     每个 bench 配置中都采集的锚点计数器，横轴 = bench；
+   - **图 B（仿 2c/2f）**：L3 HITS/MISSES/EVICTIONS 事件分解堆叠柱，
+     P4/P5 同配置直接对比（随机访存 vs cache 抖动），P6 的 HITS/MISSES
+     可并入；
+   - **图 C（仿 2b/2e）**：MEMORY_READS+WRITES 带宽速率与 L2/L3 命中率，
+     P3/P6 对比（顺序带宽 vs I/O 路径）；
+   - **图 D**：各场景面板图——每个 bench 用自己配置内的计数器出
+     1–2 张时间序列/事件分解图（背压类 MSS_NO_CREDIT 只在 P3、
+     REQ_BUF_EMPTY 只在 P1 内出图）。
 
 ## 备注
 
