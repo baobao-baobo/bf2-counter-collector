@@ -63,7 +63,9 @@ def main():
             if not os.path.exists(p):
                 sys.exit(f"missing {p}")
             runs.append(load_run(p))
-        arr = np.vstack(runs)                    # 3 x 60
+        # files may have 69 or 70 data rows; align to the shortest
+        n = min(len(r) for r in runs)
+        arr = np.vstack([r[:n] for r in runs])   # 3 x n
         series[b] = np.median(arr, axis=0)
         run_means = arr.mean(axis=1)
         summary[b] = np.median(run_means)
