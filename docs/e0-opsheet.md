@@ -132,7 +132,8 @@ pkill iperf3
 **3.1 【BF2】准备测试文件**（**严禁对 /dev/mmcblk0 裸设备读写——eMMC 是系统盘**）：
 ```bash
 df -h /root | tail -1        # 看剩余空间，够 2G 就用 2G，不够改 1G
-fallocate -l 2G /root/fio_testfile
+# ⚠️ 必须写真实数据！fallocate 创建的文件读取时不落盘（E0-3 第一轮教训：mmcblk0 ios=0）
+/root/bf2k/bench/bin/fio --filename=/root/fio_testfile --rw=write --direct=1 --size=2G --bs=128k --name=warmup
 ls -l /root/fio_testfile     # 应显示 2147483648
 ```
 
@@ -153,6 +154,8 @@ sudo ./code/collect_all -c configs/e0_trio_map.conf -d 35 -o e0_3_emmc.csv
 ls -l /root/bf2k/e0_3_emmc.csv
 rm /root/fio_testfile
 ```
+
+**判读前自查**：fio 输出末尾的 `Disk stats` 行，`mmcblk0: ios=` 必须是数千以上、`BW` 在 100–400 MB/s 量级——才说明真的读盘了；若 `ios=0` 且 BW 上 GB/s，本轮作废重跑 3.1。
 
 **笔记内容**：fio 打印的读带宽（BW=...MiB/s）、BF2 屏幕上哪些列跳动（预期：tile 的 IO_ACCESS 明显涨；trio/pcie 纹丝不动）。
 

@@ -221,7 +221,7 @@ MEMORY_READS  | 3e5         | 5e5            | 2e5     | ...         | ...
 | 相位负载漂移（stress-ng 恒定性不足） | 用固定迭代次数的自研循环（memrand 风格）替代；sidecar 记录每相位 CPU 利用率作质控 |
 | 轮换不整除相位 | §6.3 规则 3：调整轮换周期至整除 |
 | tile 空间不对称（地址片偏差） | 全部归因在 Σtile 聚合面做；绑核对称；若聚合校验失衡，检查单 tile 分布 |
-| fio 走 tmpfs 不触发 DMA；实机无 NVMe（系统盘 eMMC） | 用 eMMC 测试文件 + `--direct=1`；**严禁 `--filename=/dev/mmcblk0` 裸设备**（eMMC 是系统盘，写裸设备毁系统）；测试文件大小先看 `df -h /` 余量（建议 1–2 GB）；网络流（iperf3 接收）作备选 |
+| fio 走 tmpfs 不触发 DMA；实机无 NVMe（系统盘 eMMC） | 用 eMMC 测试文件 + `--direct=1`；**严禁 `--filename=/dev/mmcblk0` 裸设备**（eMMC 是系统盘，写裸设备毁系统）；测试文件大小先看 `df -h /` 余量（建议 1–2 GB）；网络流（iperf3 接收）作备选。**⚠️ E0-3 实测教训（2026-09-11）：`fallocate` 创建的文件是"未写扩展区"，读取由内核填零、完全不落盘（mmcblk0 ios=0，速率 5.9 GB/s 远超 eMMC 上限）——测试文件必须先写真实数据**：`fio --rw=write --direct=1 --size=2G --bs=128k --name=warmup` 或 `dd if=/dev/zero of=... oflag=direct`，写完再跑读相位；每次读实验后核对 fio 输出末尾 `mmcblk0: ios=` 确认真实落盘 |
 | IB 写无计数 | 守恒推断 + 在论文中显式声明该边界（与 IB 段"写方向未定义独立计数"呼应） |
 | 设备 apt 不通、无外网 | 全部二进制静态交叉编译后离线部署（既有流程），新工具同规 |
 
