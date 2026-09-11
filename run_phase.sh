@@ -5,7 +5,8 @@
 # after a pre-idle phase, so the CSV contains idle/app/idle segments.
 # A phase log is written next to the CSV for tools/split_path.py.
 #
-# usage (run from /root/bf2k on the device):
+# usage (run from anywhere on the device; config/output/app paths
+# resolve against the script's own directory):
 #   sudo ./run_phase.sh -c CONFIG -o OUT.csv -a "APP CMD" [-p PRE] [-t APP] [-s POST] [-b BIND]
 #
 #   -c CONFIG   collect_all config (e.g. configs/app_full.conf)
@@ -21,6 +22,11 @@
 # segment stays clean.  Actual phase boundaries are recorded in the
 # log; split_path.py segments the CSV by those timestamps.
 set -u
+
+# Anchor everything to this script's directory so the working directory
+# does not matter.
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+COLLECT="$SCRIPT_DIR/code/collect_all"
 
 PRE=5; APP=24; POST=5; BIND=""
 while getopts "c:o:a:p:t:s:b:h" opt; do
@@ -38,12 +44,16 @@ while getopts "c:o:a:p:t:s:b:h" opt; do
 done
 [ -n "${CONFIG:-}" ] && [ -n "${OUT:-}" ] && [ -n "${APPCMD:-}" ] || { echo "need -c -o -a"; exit 2; }
 
+# Resolve relative -c/-o arguments against the script directory.
+case "$CONFIG" in /*) ;; *) CONFIG="$SCRIPT_DIR/$CONFIG" ;; esac
+case "$OUT" in /*) ;; *) OUT="$SCRIPT_DIR/$OUT" ;; esac
+
 TOTAL=$((PRE + APP + POST))
 LOG="$OUT.phase.log"
 
 START=$(date +%s)
 echo "[run_phase] collect_all: ${TOTAL}s window, output $OUT"
-./code/collect_all -c "$CONFIG" -o "$OUT" -d "$TOTAL" &
+"$COLLECT" -c "$CONFIG" -o "$OUT" -d "$TOTAL" &
 COL_PID=$!
 sleep 1
 

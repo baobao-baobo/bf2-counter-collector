@@ -9,8 +9,9 @@
 # apps/src/, they are shipped in the repository).
 set -e
 
-SRC=$(dirname "$0")/src
-BIN=$(dirname "$0")/bin
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+SRC="$SCRIPT_DIR/src"
+BIN="$SCRIPT_DIR/bin"
 JOBS=$(nproc)
 XZ_VER=5.6.4
 REDIS_VER=7.2.5
