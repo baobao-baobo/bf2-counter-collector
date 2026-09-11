@@ -88,42 +88,61 @@ sudo ip addr del 192.168.101.1/24 dev enp94s0f0np0
 
 ## 2. E0-2：NAD（网口 Arm 面）——需要【宿主机】+【BF2】各一个终端
 
-> ⚠️ 2026-09-11 实况修正：BF2 的 192.168.100.2 是 **rshim 管理口**（fujian 侧 tmfifo_net0），对它的流量不走 ConnectX 网口，**不能生成 NAD**。真正的 NAD 目标 = BF2 上 ConnectX 网口（Arm 侧）的 IP，先做 2.0 找出它。
+> 2026-09-11 网口指认（BF2 `ip a` 实况）：tmfifo_net0=192.168.100.2 是 rshim 管理口（E0-2b 对照用）；**端口 0 Arm 面 = enp3s0f0s0（空闲无 IP，首选目标）**；端口 1 Arm 面 = enp3s0f1s0（192.168.56.103，备选）；OVS 桥 = p1↔pf1hpf（端口 1 直通桥，E0-1 尝试 B 实际走的桥）；pf0hpf 不在桥里。
 
-**2.0 【BF2】侦察网口**：
-```bash
-ip a | grep -B2 "inet "
-```
-找 ConnectX 网口（名字常含 enp/oob_net/p0p1，MAC 前缀多为 00:1a:ca / 08:c0:eb / 00:02:c9 等 NVIDIA/Mellanox 段）。**把完整输出贴给 Claude 指认目标 IP**（拿不准就贴，别猜）。目标 IP 记为 `<NAD_IP>`。
+**2.1 主尝试：端口 0 Arm 面 + 业务网直打（纯 wire NAD）**
 
-**2.1 【BF2】起 iperf3 服务端（后台）**：
+2.1.1 【宿主机】探空地址（无响应可用；有响应换 .251）：
 ```bash
-/root/bf2k/bench/bin/iperf3 -s -p 5202 -B <NAD_IP> -D
+ping -c 2 172.28.4.250
 ```
 
-**2.2 【BF2】开采集（50 秒）**：
+2.1.2 【BF2】配临时 IP + 起服务端：
+```bash
+sudo ip addr add 172.28.4.250/24 dev enp3s0f0s0
+/root/bf2k/bench/bin/iperf3 -s -p 5202 -B 172.28.4.250 -D
+```
+
+2.1.3 【BF2】开采集（50 秒）：
 ```bash
 cd /root/bf2k
 sudo ./code/collect_all -c configs/e0_trio_map.conf -d 50 -o e0_2_nad.csv
 ```
-开始刷行后立刻切到宿主机执行 2.3。
 
-**2.3 【宿主机】打两个方向流量**（`<NAD_IP>` 与 fujian 同网段即可直连；跨网段先 `ip route` 或问 Claude）：
+2.1.4 【宿主机】采集开始后立刻打两个方向：
 ```bash
-iperf3 -c <NAD_IP> -p 5202 -t 10
+iperf3 -c 172.28.4.250 -p 5202 -t 10
 sleep 5
-iperf3 -c <NAD_IP> -p 5202 -t 10 -R
+iperf3 -c 172.28.4.250 -p 5202 -t 10 -R
 ```
 
-**2.4 【BF2】等采集结束**，确认文件并关掉服务端：
+2.1.5 【BF2】等采集结束 + 清理：
 ```bash
 ls -l /root/bf2k/e0_2_nad.csv
 pkill iperf3
+sudo ip addr del 172.28.4.250/24 dev enp3s0f0s0
 ```
 
-**2.5 对照组 E0-2b（可选但建议做，验证判读标准）**：把 2.1 的服务端换成绑在 192.168.100.2 上（rshim 口），重复 2.2–2.4，输出 `e0_2b_rshim.csv`。预期：`net` 软件计数涨、trio/pcie 纹丝不动。
+⚠️ 若 2.1.2 后 ping 不通（eSwitch 未把 wire 流量转给 Arm 面），进备选：
 
-**笔记内容**：`<NAD_IP>` 及其接口名、iperf3 吞吐（两个方向）、BF2 屏幕上哪些列跳动（重点 trio 的 TDMA_DATA_BEAT、pcie 的 rx/tx 字节列、`net` 软件计数列）。
+**2.2 备选 A：端口 1 Arm 面（192.168.56.103）**——eno1 加同段临时 IP 直打：
+```bash
+# 【宿主机】
+sudo ip addr add 192.168.56.100/24 dev eno1
+ping -c 3 192.168.56.103          # 通则继续；不通删 IP（sudo ip addr del 192.168.56.100/24 dev eno1）进备选 B
+# 【BF2】服务端改绑：/root/bf2k/bench/bin/iperf3 -s -p 5202 -B 192.168.56.103 -D
+# 【宿主机】照 2.1.3–2.1.4 打 192.168.56.103（-o e0_2_nad.csv 同）
+```
+
+**2.3 备选 B：主机面 56.11 → Arm 面 56.103**（路径 PCIe→eSwitch→Arm，能回答"Arm 面 TRIO 是哪个"但非纯 wire NAD）：
+- ⚠️ enp94s0f1np1（192.168.56.11）是别人在用的口：只打 `-t 10` 短流量，先确认无重要业务；
+- 【宿主机】直接 `iperf3 -c 192.168.56.103 -p 5202 -t 10`（fujian 已有 56.0/24 直连路由 via enp94s0f1np1）。
+
+**2.4 对照组 E0-2b**：服务端绑 192.168.100.2（rshim），重复采集，输出 `e0_2b_rshim.csv`。预期：`net` 软件计数涨、trio/pcie 纹丝不动。
+
+**判读问题（CSV 回传后 Claude 答）**：① trio TDMA_DATA_BEAT 涨吗（Arm↔网卡 DMA 走 TRIO，预期涨）；② pcie0 还是 pcie1 涨（NIC 面 TRIO = 哪个，预期 pcie1）；③ net 软件计数同步涨 = 流量确实到 Arm 面（三方交叉验证）；④ smmu/triogen 网格 FIFO 有无信号。
+
+**笔记内容**：用的哪条尝试路径、接口名、iperf3 吞吐（两个方向）、BF2 屏幕上哪些列跳动。
 
 ---
 
