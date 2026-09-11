@@ -59,8 +59,11 @@ sudo ./run_phase.sh -c configs/app_full.conf -o g1_run1.csv -t 40 \
 
 ```bash
 cd /root/bf2k
+# 56.x 为卡内 OVS 隔离网络（仅 Arm 与主机之间），无公网暴露风险，故
+# 关闭 protected-mode（否则非回环连接全部被拒，ping 也会 DENIED）。
+pkill -x redis-server || true                       # 清掉可能残留的旧实例
 apps/bin/redis-server --bind 192.168.56.103 --port 6379 --save "" \
-    --appendonly no --daemonize yes
+    --appendonly no --protected-mode no --daemonize yes
 apps/bin/redis-cli -h 192.168.56.103 ping        # 期望 PONG
 ```
 
