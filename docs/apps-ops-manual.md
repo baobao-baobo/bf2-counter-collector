@@ -19,14 +19,14 @@
 ## 1. 部署（GitHub → fujian → BF2）
 
 ```bash
-# fujian 上（/tmp/bf2k 为部署克隆）：
-cd /tmp/bf2k && git pull
-tar czf /tmp/bf2deploy.tar.gz --exclude=.git .
-scp /tmp/bf2deploy.tar.gz root@192.168.100.2:/root/bf2k/
-
-# BF2 上：
-cd /root/bf2k && tar xzf bf2deploy.tar.gz
+# fujian 上（/tmp/bf2k 为部署克隆；首次先 cd /tmp/bf2k && git pull 拿到 deploy.sh）：
+bash deploy.sh        # 只同步（脚本/配置变更）
+bash deploy.sh -b     # 同步 + 设备上 make 重编译（改了 code/*.c 时）
 ```
+
+- deploy.sh 只打包 **git 跟踪的文件**（`git ls-files`），本地编译产物（如
+  Windows 侧的 x86_64 collect_all）和回传的 results/CSV 永远不会混入部署包、
+  不会覆盖设备上的原生二进制。
 
 ## 2. 设备侧一次性准备（约 15-20 分钟，主要在编译）
 
@@ -136,6 +136,9 @@ python tools\split_path.py ^
 
 ## 8. 故障排查
 
+- `cannot execute binary file: Exec format error`（collect_all）：部署包曾覆盖
+  设备原生二进制（旧 tar 方式混入 Windows 侧 x86_64 产物）。设备上
+  `cd /root/bf2k && make` 重建即可；新版 deploy.sh 已根治此问题。
 - `--check-config` 报错：贴输出给 Claude。
 - redis 客户端连不上：fujian `ping 192.168.56.103` 先验证 56.x 管道；再
   `redis-cli -h 192.168.56.103 ping`。

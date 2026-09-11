@@ -20,10 +20,11 @@ REBUILD=0
 cd "$CLONE_DIR"
 git pull
 
-# Ship everything except git metadata, device results pulled back here,
-# and stray CSVs (keeps the tarball small and avoids round-tripping
-# device output back onto the device).
-tar czf "$TARBALL" --exclude=.git --exclude='results' --exclude='*.csv' .
+# Ship ONLY git-tracked files. This is what keeps the device safe: local
+# build artifacts (e.g. an x86_64 code/collect_all from the Windows/WSL
+# side) and pulled-back results are never tracked, so they can never be
+# packed and overwrite the device's native aarch64 binaries.
+git ls-files -z | tar --null -T - -czf "$TARBALL"
 
 scp "$TARBALL" "$DEV_HOST:$DEV_DIR/"
 if [ "$REBUILD" = 1 ]; then
