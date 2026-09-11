@@ -32,24 +32,22 @@
 - 评审 CRITICAL #2（"NHD 仅 TLR 可见"无官方依据）现在有实测结论：**NHD 对 Arm 侧计数器不可见**。论文 PCIe 域表述方向改为："主机直通流量不经 Arm 侧 PCIe 根复合体，Arm 侧 PMC 不可观测（E0 实测）；NHD 观测采用主机侧手段"。
 - 与 7 通道图的"链路 B 完全旁路 Arm 域"表述一致，可互相印证。
 
-## E0-3（eMMC 对照，第一轮 2026-09-11）——作废：fio 没有真正读盘
+## E0-3（eMMC 对照）——第一轮作废 + 第二轮成功
 
-**fio 自证**（bf2-message_1.txt）：`READ: bw=5674MiB/s (5949MB/s)`，`mmcblk0: ios=0/148`，读延迟 21 µs，sys=93.68%。
-- 5.9 GB/s 是 eMMC 物理上限（~300 MB/s）的 20 倍，且 fio 自报磁盘**读 IO 为 0** → 全部读操作由内核填零完成，**没有发生任何 eMMC 访问**。
-- 原因：`fallocate -l 2G` 创建的是"未写扩展区"（unwritten extents），读取返回零页，不经设备。
-- 顺带结论：E0-3 配置下 A72_ACCESS 在 45K IOPS 的 psync syscall 洪流下冲到 ~50M/s（基线 0.7M/s，70 倍）——A72_ACCESS 对"内核 syscall 密集负载"的响应量级有了一个真实数据点（fio psync 在 BF2 上是 CPU 绑定负载）。
+**第一轮作废**（fallocate 教训）：`bw=5674MiB/s`、`mmcblk0: ios=0/148`、sys=93.68%——fallocate 的"未写扩展区"读取由内核填零、不落盘。A72_ACCESS 冲到 50M/s（syscall 洪流）反而留下一个数据点。教训已写入方案文档 §9 与操作单 §3：测试文件必须 fio write pass 真实落盘。
 
-**计数器面**（e0_3_emmc.csv，35 行）：fio 窗口（行 11–35）内 tile_io_access 维持 5–11K/s 基线无尖峰、trio 全零、pcie0/pcie1 维持 E0-1 同样的 5 s 背景脉冲（背景模式完全复现 = 可重复性 ✓）、smmu/triogen 平稳——与"没有真实 IO"完全自洽。**本次不能作为 eMMC DMA 是否走 RN-I 的证据**。
+**第二轮成功**（2026-09-11，e0_3_emmc.csv + bf2-message.txt）：
+- fio：**BW=43.0 MiB/s、IOPS=344、clat 2.9 ms、`mmcblk0: ios=8571/66、util=99.68%`、25 s 读 1076 MiB** → 真实读盘、设备饱和（43 MB/s 即本板 eMMC 真实能力，比一般 eMMC 慢，但无碍判读）；
+- 计数器面：
+  - **tile_io_access：基线 5–10K/s → fio 窗口稳定台 ~735K/s（约 100 倍），窗口起止与 fio 对齐（行 9–34）** → **eMMC 控制器 DMA 走网格 RN-I 通路**（IB 式旁路）实锤；
+  - **定量吻合**：735K 次/s ≈ 344 IOPS × 2048 行/IO（128KB/64B）——IO_ACCESS 按缓存行粒度计数，语义自洽；
+  - **trio DMA 计数全零 + pcie0/pcie1 无任何响应** → eMMC 不在 PCIe Switch 下，板载存储 DMA 不经 TRIO/PCIe——路径框架边界确认；
+  - A72_ACCESS 几乎不涨（sys=1.08%，vs 第一轮 93.68%）→ 两轮对比坐实"第一轮是 CPU 负载、本轮是真实 DMA"；
+  - pcie 背景 5 s 脉冲第三次复现 → 可重复性 ✓。
 
-**E0-3 重做要求**（已写入方案文档 §9 风险表）：先写真实数据再读：
-```bash
-/root/bf2k/bench/bin/fio --filename=/root/fio_testfile --rw=write --direct=1 --size=2G --bs=128k --name=warmup   # 真实落盘
-# 然后照旧：采集 35 s + --rw=read --direct=1 --runtime=25
-```
-判读时核对 fio 末尾 `mmcblk0: ios=` 数千以上、BW 在 100–400 MB/s 量级，才确认真的读盘。
+**E0-3 结论**：eMMC DMA = 网格 RN-I 通路，不经 PCIe；tile IO_ACCESS 是板载存储流量的主观测计数器（预期基线见本表，B5/M1/M5 可按 735K/s 量级做预期校准）。
 
 ## 待办
 
 - **E0-2**（NAD）：需先在 BF2 `ip a` 侦察 ConnectX 网口（Arm 侧）IP，由 Claude 指认目标后再打 iperf3；rshim 口测试作对照组 E0-2b。
-- **E0-3 重做**（真读盘版本）：预期 tile IO_ACCESS 涨、trio/pcie 不动；若 pcie0/pcie1 出现响应则重新评估 eMMC 挂接位置。
-- E0-2/E0-3 完成后汇总出"TRIO↔端口映射表"，写入方案文档 §4，并定稿论文 PCIe 域表述。
+- E0-2 完成后汇总出"TRIO↔端口映射表"（当前状态：主机面=不经任何 TRIO（E0-1）；eMMC=不经 TRIO/PCIe（E0-3）；pcie0=rshim 管理链路假说（5s 心跳逐行同步）；pcie1=Arm↔NIC 假说待 E0-2 证实），写入方案文档 §4，并定稿论文 PCIe 域表述。
