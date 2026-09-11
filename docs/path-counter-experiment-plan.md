@@ -38,8 +38,8 @@
 | CR | A72_ACCESS / A72_READ / A72_WRITE、RNF_REQUESTS（入口） | HNF_REQUESTS、DIR_HIT、ALLOCATE、VICTIM、POC_*、MEMORY_READS/WRITES、L3 全套、VICTIM_WRITE、MSS_NO_CREDIT、REQ_BUF_EMPTY、tilenet CDN/NDN/DDN | — |
 | IH | IO_ACCESS / IO_READS / IO_WRITE / TSO_WRITE（入口） | 同 CR 的 HNF/MSS/L3 全部共享项 | — |
 | IB | MEMORY_READS_BYPASS（**仅读方向**） | MEMORY_READS/WRITES、tilenet DDN | **IB 写**（无独立计数，守恒推断） |
-| NAD | trio TDMA_DATA_BEAT/PACKET（进入网格前传输）、triogen/SMMU TX_DAT_AF/RX_DAT_AF（网格数据通道 FIFO） | 进网格后与 IH/IB 混合：HNF/MSS/L3、TLR（待 E0 验证） | — |
-| NHD | （Arm 侧候选：TLR，**待 E0 验证**） | 无（若 TLR 不可见则 Arm 侧全盲） | Arm 侧全部网格/缓存计数器；主机侧观测（host NIC stats、iperf3 吞吐、PCIe link 速率）可作替代 |
+| NAD | **pcie TLR 字节寄存器**（pcie0 DMA 剖面 + pcie1 交付剖面，E0-2 实测；[trio] TDMA 计数器实测不计数网卡 DMA，弃用）、triogen/SMMU TX_DAT_AF/RX_DAT_AF（网格数据通道 FIFO） | 进网格后与 IH/IB 混合：HNF/MSS/L3 | — |
+| NHD | 无（**E0-1 实测 TLR 不可见**） | 无（Arm 侧全盲） | Arm 侧全部网格/缓存计数器；主机侧观测（host NIC stats、iperf3 吞吐、PCIe link 速率）可作替代 |
 | WB | VICTIM_WRITE（tile 侧受害行写回）、L3 EVICTIONS_BANK0/1（逐出侧） | MEMORY_WRITES（写回汇入普通写流量） | WB 的触发路径归属（CR 写 vs IH 写），仅相位差分可辨 |
 
 > 说明：IH 与 IB 的 bench 归属是**预期而非预设**——NVMe fio 直读预期为 IB 式旁路、virtio 网络接收预期为 IH 式相干，但最终以计数器读数裁定（哪个入口计数涨、BYPASS 是否涨、LLC 是否分配）。实验的职责是分类验证，不是按剧本套用。
@@ -79,7 +79,7 @@ C = α·CR_in + β·IO_in,  拟合优度 R²；|α−β|/α < 10% 判定模型�
 ### 3.3 专用计数器直接读数
 
 - IB 读 = MEMORY_READS_BYPASS（专用，无需归因）
-- 各路径入口 = A72_* / IO_* / TDMA_* / TLR（若 E0 通过）
+- 各路径入口 = A72_* / IO_* / TLR（NAD，E0-2 实测；TDMA_* 不计数网卡 DMA，弃用）
 - WB 直接证据 = VICTIM_WRITE + EVICTIONS（配合相位差分定归属）
 
 ### 3.4 守恒校验方程（每次实验必须对账）
@@ -112,6 +112,12 @@ C = α·CR_in + β·IO_in,  拟合优度 R²；|α−β|/α < 10% 判定模型�
 
 **产出**：TRIO↔（主机接口、网口 Arm 面、NVMe）映射表 → 回填论文 PCIe 域段落与 §2 覆盖矩阵 → 解锁 NHD bench 设计。
 
+> **✅ E0 全部完成（2026-09-11，详见 docs/e0-analysis.md）**：
+> - **E0-1 → NHD-A**：33 Gbps 主机直通流量对 pcie0/pcie1 零响应——NHD 不经任何 Arm 侧 TRIO，Arm 侧 PMC 不可观测，NHD 观测改为主机侧手段。
+> - **E0-2 → NAD 双链路剖面**（备选 B 通道：主机面 56.11→Arm 面 56.103 的 OVS 管道）：pcie0 = 网卡 Arm PF 收发队列 DMA 链路（方向跟随流量）；pcie1 = eSwitch/OVS 交付链路（双向 IN≈OUT≈流量）；**[trio] TDMA_DATA_BEAT 全程 0——TDMA 计数器不计数网卡 DMA，NAD 观测点改用 pcie TLR**。
+> - **E0-3 → eMMC 不经 PCIe**：DMA 走网格 RN-I（tile IO_ACCESS 基线 5–10K→735K/s），与预期一致。
+> - **映射表**：主机面 = 无 TRIO；网口 Arm 面 = TRIO0（DMA）+ TRIO1（交付）；eMMC = 无 PCIe；rshim 未占用 TRIO 主信号（E0-2b 可选）。
+
 ---
 
 ## 5. Bench 矩阵
@@ -125,8 +131,8 @@ C = α·CR_in + β·IO_in,  拟合优度 R²；|α−β|/α < 10% 判定模型�
 | B3 | memrand 1GB | CR（miss 型） | DIR_HIT、ALLOCATE、L3 HITS/MISSES | 同 B1 |
 | B4 | stress-ng --cache 8 | CR + **WB** | VICTIM_WRITE、EVICTIONS、ALLOCATIONS | 同 B1 |
 | B5 | fio eMMC 文件直读（`--direct=1`，实机无 NVMe，文件落 /root） | **IB**（预期，实测裁定） | MEMORY_READS_BYPASS、IO_*、tilenet DDN | path_ib.conf（+tilenet、trio、pcie） |
-| B6 | iperf3 Arm 侧（本机收发） | **NAD** | TDMA_*、TX/RX_DAT_AF、TLR、net 软件计数 | path_nad.conf（+trio、triogen、smmu、pcie） |
-| B7 | iperf3 主机直通 | **NHD** | 按 E0 结论二选一（TLR 或纯主机侧） | path_nhd.conf |
+| B6 | iperf3 Arm 侧（本机收发） | **NAD** | pcie TLR（pcie0 DMA + pcie1 交付剖面）、TX/RX_DAT_AF、net 软件计数 | path_nad.conf（+triogen、smmu、pcie） |
+| B7 | iperf3 主机直通 | **NHD** | 纯主机侧（host NIC stats、iperf3 吞吐、PCIe link 速率）——E0-1 定 NHD-A，Arm 侧全盲 | path_nhd.conf |
 
 ### 5.2 实验组（多路径，相位模板 A/B/C）
 
@@ -137,7 +143,7 @@ C = α·CR_in + β·IO_in,  拟合优度 R²；|α−β|/α < 10% 判定模型�
 | M1（用户示例落地） | stress-ng --cpu 8 | + fio eMMC 文件直读（--direct=1） | HNF_REQUESTS / MEMORY_READS 拆 CR vs IH |
 | M2 | stress-ng --cpu 8 | + memrand -w（写模式） | WB 拆分：VICTIM_WRITE/EVICTIONS 归 CR 写 vs 追加写 |
 | M3 | iperf3 Arm 接收（NAD） | + stress-ng --cpu 4（CR 处理） | NAD 网格后段拆分：HNF/MSS 中 NAD vs CR |
-| M4 | iperf3 主机直通（NHD） | + iperf3 Arm 侧同网口（NAD） | NAD vs NHD 同源流量的 PCIe 侧对比（依 E0 结果） |
+| M4 | iperf3 主机直通（NHD） | + iperf3 Arm 侧同网口（NAD） | NAD vs NHD 同源流量对比：Arm 侧 TLR（NAD 涨、NHD 平，E0 实测）＋主机侧统计（双方同量） |
 | M5 | fio eMMC `--direct=1`（旁路式） | + fio 页缓存缓冲读（Arm 参与，相干式） | IB vs IH 的 MSS 代价对比（BYPASS vs 相干） |
 
 每个 M 实验对应一份**归因表**（§7.3）与守恒校验表。
@@ -206,7 +212,7 @@ MEMORY_READS  | 3e5         | 5e5            | 2e5     | ...         | ...
 
 ## 8. 执行顺序与里程碑
 
-1. **E0**（已排期，2026-09-11 起）：TRIO/端口映射 + NHD 可观测性 → 定稿论文 PCIe 域表述、定 NHD 观测集。**执行材料已备**：`configs/e0_trio_map.conf`（本地已过 --check-config）+ `docs/e0-opsheet.md`（三步实验操作单 + 判读标准），部署走 GitHub→fujian→scp 既有链路；
+1. **E0** ✅（2026-09-11 完成，结果见 §4 与 docs/e0-analysis.md）：NHD-A（TLR 不可见）+ NAD 双链路剖面（pcie0 DMA / pcie1 交付）+ eMMC 不经 PCIe → 论文 PCIe 域表述已定稿方向、NHD 观测集定为主机侧；
 2. **基线组 B1–B7**：先出单路径速率基线与轮换对齐验证（check_csv.py 复用）；
 3. **实验组 M1**（用户示例）：完整跑通差分 + 比例模型 + 守恒校验三件套，**方法定型后**再铺开 M2–M5；
 4. **工具**：run_phase.sh（相位式运行）+ tools/split_path.py 在 M1 前完成；
@@ -217,7 +223,7 @@ MEMORY_READS  | 3e5         | 5e5            | 2e5     | ...         | ...
 
 | 风险 | 应对 |
 |---|---|
-| E0 证明 TLR 对 NHD 不可见 | 执行方案 NHD-A 分支：NHD 观测改为主机侧（host NIC stats、iperf3 吞吐、PCIe link 速率），论文表述按"Arm 侧不可见"定稿；M4 对比退化为吞吐级对比 |
+| ~~E0 证明 TLR 对 NHD 不可见~~ **已发生（E0-1 实测）** | NHD-A 分支生效：NHD 观测为主机侧（host NIC stats、iperf3 吞吐、PCIe link 速率），论文表述按"Arm 侧不可见"定稿；M4 对比 = Arm 侧 TLR 平（NHD）vs 涨（NAD）+ 主机侧双方统计 |
 | 相位负载漂移（stress-ng 恒定性不足） | 用固定迭代次数的自研循环（memrand 风格）替代；sidecar 记录每相位 CPU 利用率作质控 |
 | 轮换不整除相位 | §6.3 规则 3：调整轮换周期至整除 |
 | tile 空间不对称（地址片偏差） | 全部归因在 Σtile 聚合面做；绑核对称；若聚合校验失衡，检查单 tile 分布 |
@@ -229,7 +235,7 @@ MEMORY_READS  | 3e5         | 5e5            | 2e5     | ...         | ...
 
 | 实验 | 支撑论文内容 |
 |---|---|
-| E0 | PCIe 域段落 NHD 观测句定稿（替换"待实测"表述）；附录 TLR Scope 注释 |
+| E0 | ✅ PCIe 域段落定稿（NHD 不可见 + NAD 双 TRIO 可见，E0 实测）；附录 TLR Scope 注释 |
 | B1–B4 | CR/WB 基线速率；图 X 各路径流量量级 |
 | B5/B6/B7 | IB/NAD/NHD 单路径刻画；IB 读专用计数验证 |
 | M1 | HNF 汇聚点 CR/IH 拆分——分类节总结段"逐路径流量分析"能力的直接证据 |
