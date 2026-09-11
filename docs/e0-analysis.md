@@ -53,12 +53,12 @@
 1. **NAD 对 Arm 侧 PCIe TLR 完全可见**——E0-2 核心问题答"是"。且是**双链路结构**：
    - **pcie0 = 网卡 Arm PF 收发队列的 DMA 数据链路**：方向严格跟随流量（收时 IN≈流量/OUT≈0，发时 OUT≈流量/IN≈0），两相位互证，教科书级 DMA 剖面；
    - **pcie1 = eSwitch/OVS 交付链路**（代表口桥接流量的进-出回注路径）：双向 IN≈OUT≈流量。
-2. **每帧两次跨越 PCIe 的自洽模型**（前向为例）：帧进 pf1hpf → 交付 Arm 桥（pcie1 IN）→ 桥回注到 Arm PF（pcie1 OUT）→ eSwitch 环回 → Arm PF 收包 DMA（pcie0 IN）→ 协议栈。反向对称：发包 DMA（pcie0 OUT）→ eSwitch → 环回交付桥（pcie1 IN）→ 桥出口 pf1hpf 回注（pcie1 OUT）→ 主机。该模型逐列吻合四个剖面（pcie0 前/后向、pcie1 前/后向），并同时解释 **net rx≈tx**（同一 Arm PF 上"先发后收"的环回签名）与**前向 62,910 重传**（回注路径在高压下系统丢包、cwnd 卡死；反向不经过 Arm PF 回注、仅 7,405 重传）。
+2. **每帧两次跨越 PCIe 的自洽模型**（前向为例）：帧进 pf1hpf → 交付 Arm 桥（pcie1 IN）→ 桥回注到 Arm 面接口（pcie1 OUT，即桥内 SF0 en3f1pf1sf0）→ eSwitch 环回 → Arm 面接口收包 DMA（pcie0 IN）→ 协议栈。反向对称：发包 DMA（pcie0 OUT）→ eSwitch → 环回交付桥（pcie1 IN）→ 桥出口 pf1hpf 回注（pcie1 OUT）→ 主机。该模型逐列吻合四个剖面（pcie0 前/后向、pcie1 前/后向），并同时解释 **net rx≈tx**（同一 Arm PF 上"先发后收"的环回签名）与**前向 62,910 重传**（回注路径在高压下系统丢包、cwnd 卡死；反向不经过 Arm PF 回注、仅 7,405 重传）。
 3. **[trio] 块 TDMA_DATA_BEAT 全程为 0** → 方案中"NAD 用 trio TDMA 计数器观测"的假设被实测证伪。**NAD 的正确观测点是 pcie TLR 字节寄存器**（pcie0 方向剖面 + pcie1 对称剖面），方案文档 §4 路径表 NAD 行须据此修订。
 4. E0-1 遗留假说裁定：pcie0=rshim 假说**推翻**（其 5 s 脉冲实为 56.x 管道周期包）；pcie1=Arm↔NIC 假说**证实**并细化为"eSwitch/OVS 交付链路"。E0-1 里 pcie1 的 25–40K/80–150K 背景 = 56.x 管道上他人流量的持续背景。
 5. 性能数据点（论文可引用）：同样跨 Arm 面，**收包方向（6.62 Gbps、62K 重传）显著弱于发包方向（11.5 Gbps）**——A72 弱核 + OVS 软件回注在收路径上的代价，正是"NAD 路径开销"论点的实测佐证。
 
-**留待确认（可选，不影响上述结论）**：`ovs-vsctl show` / `ovs-ofctl dump-flows` 确认桥成员与流表（预期：桥 = {p1, pf1hpf, enp3s0f1s0}，流表为 pf1hpf↔Arm PF 直通规则）。
+**OVS 实况确认（2026-09-11 用户执行）**：`ovs-vsctl show` 坐实桥结构——**ovsbr1 = {p1, pf1hpf, en3f1pf1sf0, 内部口}**，Arm 面成员是端口 1 的 **SF0（en3f1pf1sf0）**，与预期结构一致（物理口 + 主机面 + Arm 面接口同桥同段）；ovsbr1 内 en3f1pf1sf2 与 ovsbr2 内 en3f1pf1sf3 报 "No such device"，系先前删除 SF 留下的死端口条目，无害。修正一处接口名：正文两跨模型中的 "Arm PF" 即该 SF 接口——PF（enp3s0f1s0）与其 SF 均跨越同一 Arm 侧 TRIO，计数剖面不受影响。残留两问（均低优先级、不影响结论）：① `ip -br addr` 确认 56.103 配在 PF 还是 SF0 上；② `ovs-ofctl dump-flows ovsbr1` 看流表（刚才是对 ovs-system 执行故报错——ovs-system 是 datapath 句柄，不是桥名）。
 
 ## 对论文的影响（待用户批准后改）
 
@@ -70,7 +70,7 @@
 
 | 链路/块 | 实际承载 | 裁定证据 |
 |---|---|---|
-| pcie0（TRIO0 根复合体） | 网卡 Arm PF 收发队列 DMA 数据链路 | E0-2 方向剖面（前向 IN≈流量，后向 OUT≈流量） |
+| pcie0（TRIO0 根复合体） | 网卡 Arm 面接口（SF0 en3f1pf1sf0）收发队列 DMA 数据链路 | E0-2 方向剖面（前向 IN≈流量，后向 OUT≈流量） |
 | pcie1（TRIO1 根复合体） | eSwitch/OVS 交付链路（代表口桥接流量进出 Arm） | E0-2 双向 IN≈OUT≈流量；E0-1 背景 = 56.x 管道他人流量 |
 | trio0/trio1 TDMA 事件 | 不计数网卡 DMA（用途另行，弃用） | E0-2 全程 0 @ 6.6–11.5 Gbps |
 | 主机面（NHD） | 不经任何 Arm TRIO | E0-1 33 Gbps 零响应 |
@@ -96,6 +96,6 @@
 
 - ~~E0-2~~ 已完成（备选 B 通道，2026-09-11）；TRIO↔端口映射表已汇总（见上节）。
 - 方案文档 §4 路径表修订：NAD 行观测点 trio TDMA_DATA_BEAT → pcie TLR 字节寄存器（含 E0-2 的双链路剖面说明）。
-- 可选确认：`ovs-vsctl show` + `ovs-ofctl dump-flows` 核对 56.x 管道桥成员/流表（不影响结论）。
+- ~~可选确认~~ 桥成员已实锤（ovsbr1 = {p1, pf1hpf, en3f1pf1sf0}，2026-09-11）；残余低优先级：`ip -br addr` 定 56.103 归属 + `ovs-ofctl dump-flows ovsbr1` 看流表。
 - 可选对照：E0-2b（rshim 口），低优先级——映射表已闭合，仅为完备性。
 - 论文 PCIe 域表述按"对论文的影响"节方向定稿（待用户批准）。
