@@ -2,8 +2,8 @@
 
 > 对应方案文档 docs/path-counter-experiment-plan.md §4。执行者：用户。
 > 目的：① trio0/trio1 与 pcie0/pcie1 分别对应哪个端口（主机接口 / 网口 Arm 面）；② NHD（主机直通）流量是否对 Arm 侧 TLR 可见——直接决定论文 PCIe 域段落表述。
-> 角色记号：【宿主机】= 插着 BF2 的机器（默认 fujian；若 BF2 插在跳板机，宿主机就是跳板机）；【BF2】= ssh 登录 192.168.100.2 的设备终端。
-> 全程不需要懂原理，照着敲、照着记即可。CSV 回传后由 Claude 做列级分析。
+> 角色记号：【宿主机】= 插着 BF2 的机器（fujian）；【BF2】= ssh 登录 192.168.100.2 的设备终端（提示符 root@localhost）。
+> **【BF2】所有命令先 `cd /root/bf2k` 再执行**——采集引擎在 `/root/bf2k/code/collect_all`，配置在 `/root/bf2k/configs/`，bench 二进制在 `/root/bf2k/bench/bin/`，CSV 落在 `/root/bf2k/` 下。全程不需要懂原理，照着敲、照着记即可。CSV 回传后由 Claude 做列级分析。
 
 ---
 
@@ -18,22 +18,23 @@ make
 ```
 看到 `fixed: triogen0=TX_DAT_AF triogen1=RX_DAT_AF`、`rx_merged=1 tx_merged=1` 即通过。
 
-**0.2 【宿主机】确认 iperf3 存在**（没有则装）：
+**0.2 【宿主机】确认 iperf3 存在**（没有则装；⚠️ 装包会触发服务重启，见 0.2 尾注）：
 ```bash
 which iperf3 || sudo apt install -y iperf3
 ```
+> ⚠️ fujian 上 apt 装包会触发 needrestart 自动重启 rshim/networkd 服务，导致 BF2 链路中断。若中断：`sudo ip link set <接口> up && sudo ip addr add 192.168.100.1/24 dev <接口>`（接口名用 `ip a` 找），必要时 `sudo systemctl restart rshim`。**装完包务必先 `ping 192.168.100.2` 确认链路活着再继续。**
 
-**0.3 【宿主机】把配置传到 BF2**：
+**0.3 【宿主机】把配置传到 BF2**（目标路径 = 设备端仓库的 configs 目录）：
 ```bash
-scp /tmp/bf2k/configs/e0_trio_map.conf root@192.168.100.2:/root/
+scp /tmp/bf2k/configs/e0_trio_map.conf root@192.168.100.2:/root/bf2k/configs/
 ```
 
 **0.4 【BF2】确认配置与工具就位**：
 ```bash
-sudo ./collect_all --check-config -c e0_trio_map.conf   # 输出应与宿主机一致
-ls /root/bench/bin/iperf3 /root/bench/bin/fio           # 确认 bench 套件路径（下面命令按此路径写）
+cd /root/bf2k
+sudo ./code/collect_all --check-config -c configs/e0_trio_map.conf   # 输出应与宿主机一致
+ls bench/bin/iperf3 bench/bin/fio                                    # 确认 bench 二进制存在
 ```
-（若 bench 目录不在 /root/bench，用 `find / -name iperf3 2>/dev/null` 找到实际路径，后续命令替换。）
 
 ---
 
@@ -45,7 +46,7 @@ ip a
 ```
 找两个东西并**记进笔记**：
 - `<业务IP>`：正在使用的、有 IP 的网卡地址（宿主机连交换机的网卡）；
-- `<HOST_PF>`：多出来的那张网卡，通常没有 IP、状态 DOWN（名字常含 enp*/eno*）。
+- `<HOST_PF>`：多出来的那张网卡，通常没有 IP、状态 DOWN（名字常含 enp*/eno*；fujian 装有 DOCA 包，主机面网卡可能叫 enp*s0 之类）。
 > 找不到 `<HOST_PF>` → 说明宿主机上看不到 BF2 的主机面，**跳过 1.2–1.4**，在笔记里写"宿主机无 BF2 主机面网卡"，E0-1 到此为止（这本身就是一个重要结论）。
 
 **1.2 【宿主机】给主机面网卡配临时 IP 并起服务端**（`<HOST_PF>` 换成 1.1 记下的名字）：
@@ -57,7 +58,8 @@ iperf3 -s -p 5201 -B 192.168.101.1 -D
 
 **1.3 【BF2】开采集（50 秒）**：
 ```bash
-sudo ./collect_all -c e0_trio_map.conf -d 50 -o e0_1_nhd.csv
+cd /root/bf2k
+sudo ./code/collect_all -c configs/e0_trio_map.conf -d 50 -o e0_1_nhd.csv
 ```
 屏幕开始每秒刷一行后，**立刻**切回宿主机执行 1.4（不要磨蹭）。
 
@@ -71,7 +73,7 @@ iperf3 -c 192.168.101.1 -B <业务IP> -t 10 -R
 
 **1.5 【BF2】等采集自然结束**，然后确认文件生成：
 ```bash
-ls -l /root/e0_1_nhd.csv   # 存在且大小非零 = 成功
+ls -l /root/bf2k/e0_1_nhd.csv   # 存在且大小非零 = 成功
 ```
 
 **1.6 【宿主机】清理现场**：
@@ -93,12 +95,13 @@ ip a | grep -B2 "inet "
 
 **2.1 【BF2】起 iperf3 服务端（后台）**：
 ```bash
-/root/bench/bin/iperf3 -s -p 5202 -D
+/root/bf2k/bench/bin/iperf3 -s -p 5202 -D
 ```
 
 **2.2 【BF2】开采集（50 秒）**：
 ```bash
-sudo ./collect_all -c e0_trio_map.conf -d 50 -o e0_2_nad.csv
+cd /root/bf2k
+sudo ./code/collect_all -c configs/e0_trio_map.conf -d 50 -o e0_2_nad.csv
 ```
 开始刷行后立刻切到宿主机执行 2.3。
 
@@ -111,7 +114,7 @@ iperf3 -c 192.168.100.2 -p 5202 -t 10 -R
 
 **2.4 【BF2】等采集结束**，确认文件并关掉服务端：
 ```bash
-ls -l /root/e0_2_nad.csv
+ls -l /root/bf2k/e0_2_nad.csv
 pkill iperf3
 ```
 
@@ -130,18 +133,19 @@ ls -l /root/fio_testfile     # 应显示 2147483648
 
 **3.2 【BF2 窗口 A】开采集（35 秒）**：
 ```bash
-sudo ./collect_all -c e0_trio_map.conf -d 35 -o e0_3_emmc.csv
+cd /root/bf2k
+sudo ./code/collect_all -c configs/e0_trio_map.conf -d 35 -o e0_3_emmc.csv
 ```
 
 **3.3 【BF2 窗口 B】采集开始后 5 秒内执行 fio 直读**：
 ```bash
-/root/bench/bin/fio --filename=/root/fio_testfile --rw=read --direct=1 --size=2G --bs=128k --time_based --runtime=25 --name=e0_emmc
+/root/bf2k/bench/bin/fio --filename=/root/fio_testfile --rw=read --direct=1 --size=2G --bs=128k --time_based --runtime=25 --name=e0_emmc
 ```
-> 只有一个 BF2 终端时可用后台写法：`sudo ./collect_all -c e0_trio_map.conf -d 35 -o e0_3_emmc.csv & sleep 5 && /root/bench/bin/fio ... && wait`（sudo 若问密码建议还是开两个窗口）。
+> 只有一个 BF2 终端时可用后台写法：`sudo ./code/collect_all -c configs/e0_trio_map.conf -d 35 -o e0_3_emmc.csv & sleep 5 && /root/bf2k/bench/bin/fio ... && wait`（sudo 若问密码建议还是开两个窗口）。
 
 **3.4 【BF2 窗口 A】等采集结束**，确认文件并删除测试文件：
 ```bash
-ls -l /root/e0_3_emmc.csv
+ls -l /root/bf2k/e0_3_emmc.csv
 rm /root/fio_testfile
 ```
 
@@ -153,16 +157,16 @@ rm /root/fio_testfile
 
 | 文件 | 内容 |
 |---|---|
-| `/root/e0_1_nhd.csv` | E0-1 采集（若跳过了 1.2–1.4 就只回传笔记） |
-| `/root/e0_2_nad.csv` | E0-2 采集 |
-| `/root/e0_3_emmc.csv` | E0-3 采集 |
+| `/root/bf2k/e0_1_nhd.csv` | E0-1 采集（若跳过了 1.2–1.4 就只回传笔记） |
+| `/root/bf2k/e0_2_nad.csv` | E0-2 采集 |
+| `/root/bf2k/e0_3_emmc.csv` | E0-3 采集 |
 | 笔记 | 每步要求记录的内容（接口名/IP、吞吐、跳动列、任何异常现象） |
 
 【宿主机】拉回（再按你平时的链路传到 Windows 发给 Claude）：
 ```bash
-scp root@192.168.100.2:/root/e0_1_nhd.csv /tmp/
-scp root@192.168.100.2:/root/e0_2_nad.csv /tmp/
-scp root@192.168.100.2:/root/e0_3_emmc.csv /tmp/
+scp root@192.168.100.2:/root/bf2k/e0_1_nhd.csv /tmp/
+scp root@192.168.100.2:/root/bf2k/e0_2_nad.csv /tmp/
+scp root@192.168.100.2:/root/bf2k/e0_3_emmc.csv /tmp/
 ```
 
 ## 5. 判读标准（Claude 收到 CSV 后做的事，你只需提供数据）
