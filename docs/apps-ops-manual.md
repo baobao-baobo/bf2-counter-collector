@@ -153,9 +153,9 @@ python tools\split_path.py ^
 
 ## 9. G2 GAPBS（CR 随机访存/指针追逐）三连跑
 
-- 部署（见 §1）后重编译：`bash apps/build_apps_device.sh`（新版会补编
-  bfs/pr/cc；xz/redis 会顺带重编一遍，共约 15-20 分钟）。编译依赖 g++：
-  先 `which g++`，没有就贴输出给 Claude。
+- 部署（见 §1）后补编新应用（跳过已编好的 xz/redis）：
+  `bash apps/build_apps_device.sh gapbs sqlite blackscholes`（约 10 分钟）。
+  编译依赖 g++（先 `which g++`，没有就贴输出给 Claude）。
 - 校准（相位外试跑，10s 档）：
   ```bash
   time apps/bin/bfs -g 20 -n 3
