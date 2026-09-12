@@ -5,11 +5,11 @@
 -- database between calibration runs.
 .timer on
 CREATE TABLE t(id INTEGER PRIMARY KEY, a TEXT, b REAL);
-INSERT INTO t WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<1000000)
+INSERT INTO t WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<2200000)
   SELECT x, printf('%020d', x), x*1.5 FROM c;
 CREATE INDEX idx_a ON t(a);
-SELECT count(*), sum(b) FROM t WHERE a > '000000000000000000500000';
-SELECT avg(b) FROM t a JOIN t b ON b.id=a.id+1 WHERE a.id<500000;
+SELECT count(*), sum(b) FROM t WHERE a > '000000000000000001100000';
+SELECT avg(a.b) FROM t a JOIN t b ON b.id=a.id+1 WHERE a.id<1100000;
 DELETE FROM t WHERE id % 2 = 0;
 VACUUM;
 SELECT count(*) FROM t;
