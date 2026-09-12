@@ -15,6 +15,7 @@ BIN="$SCRIPT_DIR/bin"
 JOBS=$(nproc)
 XZ_VER=5.6.4
 REDIS_VER=7.2.5
+SQLITE_VER=3460100
 
 mkdir -p "$BIN"
 
@@ -38,6 +39,35 @@ make -C src -j"$JOBS" MALLOC=libc BUILD_TLS=no \
 cp src/redis-server src/redis-benchmark src/redis-cli "$BIN/"
 echo "redis-server: $(file -b "$BIN/redis-server")"
 echo "redis-cli: $(file -b "$BIN/redis-cli")"
+
+echo "== gapbs (native) =="
+cd /tmp
+rm -rf gapbs
+tar xf "$SRC/gapbs-master.tar.gz"
+cd gapbs
+make -j"$JOBS" bfs pr cc >/dev/null
+cp bfs pr cc "$BIN/"
+echo "bfs: $(file -b "$BIN/bfs")"
+
+echo "== sqlite3 $SQLITE_VER (native) =="
+cd /tmp
+rm -rf sqlite-amalgamation-$SQLITE_VER
+tar xf "$SRC/sqlite-amalgamation-$SQLITE_VER.tar.gz"
+gcc -O2 -DSQLITE_THREADSAFE=0 \
+    sqlite-amalgamation-$SQLITE_VER/sqlite3.c \
+    sqlite-amalgamation-$SQLITE_VER/shell.c -ldl -lpthread -lm -o "$BIN/sqlite3"
+echo "sqlite3: $(file -b "$BIN/sqlite3")"
+
+echo "== parsec blackscholes (native, pthreads) =="
+cd /tmp
+rm -rf bs
+mkdir bs
+tar xf "$SRC/parsec-blackscholes.tar.gz" -C bs
+cd bs/src
+make version=pthreads >/dev/null
+cp blackscholes "$BIN/blackscholes"
+gcc -O3 inputgen.c -o "$BIN/inputgen"
+echo "blackscholes: $(file -b "$BIN/blackscholes")"
 
 echo "== done, binaries in $BIN =="
 ls -la "$BIN"
