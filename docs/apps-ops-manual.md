@@ -155,7 +155,8 @@ python tools\split_path.py ^
 
 - 部署（见 §1）后补编新应用（跳过已编好的 xz/redis）：
   `bash apps/build_apps_device.sh gapbs sqlite blackscholes`（约 10 分钟）。
-  编译依赖 g++（先 `which g++`，没有就贴输出给 Claude）。
+  编译依赖 g++（实测 9.4.0 已具备；blackscholes 的 pthread 版已预展开，
+  不需要 m4）。
 - 校准（相位外试跑，10s 档）：
   ```bash
   time apps/bin/bfs -g 20 -n 3
@@ -172,7 +173,10 @@ python tools\split_path.py ^
 
 ## 10. G4 SQLite eMMC 真实读写（IB/IH）三连跑
 
-- 先找 eMMC 挂载点：`df -h | grep -i mmc`（下文以 `<EM>` 代替，如 /mnt/emmc）。
+- eMMC 挂载点实测 = **根分区 /**（/dev/mmcblk0p2，59G）。DB 路径直接用
+  `/root/bf2k/g4.db`（下文以 `<EM>` 代替）。注意：只做文件级读写，**严禁**
+  对 /dev/mmcblk0 裸设备操作；`/tmp` 是 tmpfs（内存盘），DB 绝不能放 /tmp，
+  否则测的就不是 eMMC。
 - 校准（`.timer on` 会打每条语句耗时）：
   ```bash
   rm -f <EM>/g4.db* && time apps/bin/sqlite3 <EM>/g4.db < apps/sqlite_workload.sql

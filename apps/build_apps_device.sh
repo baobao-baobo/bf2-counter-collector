@@ -84,10 +84,9 @@ if want blackscholes; then
   rm -rf bs
   mkdir bs
   tar xf "$SRC/parsec-blackscholes.tar.gz" -C bs
-  cd bs/src
-  make version=pthreads >/dev/null
-  cp blackscholes "$BIN/blackscholes"
-  gcc -O3 inputgen.c -o "$BIN/inputgen"
+  # pthread version pre-expanded from c.m4.pthreads (device has no m4)
+  g++ -O3 -DENABLE_THREADS -pthread bs/src/blackscholes_pthreads.c -o "$BIN/blackscholes"
+  gcc -O3 bs/src/inputgen.c -o "$BIN/inputgen"
   echo "blackscholes: $(file -b "$BIN/blackscholes")"
 fi
 
