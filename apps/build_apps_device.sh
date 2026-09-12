@@ -32,15 +32,22 @@ want() {
 mkdir -p "$BIN"
 
 if want xz; then
-  echo "== xz $XZ_VER (native) =="
+  echo "== xz $XZ_VER (native, static) =="
   cd /tmp
   rm -rf xz-$XZ_VER
   tar xf "$SRC/xz-$XZ_VER.tar.gz"
   cd xz-$XZ_VER
-  ./configure --disable-nls >/dev/null
+  # plain `cp src/xz/xz` copies the libtool wrapper script, which
+  # execs .libs/xz at runtime and dies with "does not exist"; install
+  # instead (real ELF) and link statically so the copied binary has
+  # no liblzma.so runtime dependency
+  ./configure --prefix="$BIN/xz-install" --disable-nls \
+      --disable-shared --enable-static >/dev/null
   make -j"$JOBS" >/dev/null
-  cp src/xz/xz "$BIN/xz"
+  make install >/dev/null
+  cp "$BIN/xz-install/bin/xz" "$BIN/xz"
   echo "xz: $(file -b "$BIN/xz")"
+  "$BIN/xz" --version | head -1
 fi
 
 if want redis; then
