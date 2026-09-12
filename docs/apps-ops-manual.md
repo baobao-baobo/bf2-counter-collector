@@ -3,7 +3,8 @@
 > 配套文档：apps-path-experiment-plan.md（方案）、e0-analysis.md（E0 定标）、
 > xz-redis-benchmarks.md（G1/G3 深度解析）
 > 第一批：G1（xz，CR 主导）+ G3（Redis，NAD 点亮）；第二批：G2（GAPBS，CR 随机
-> 访存）+ G4（SQLite eMMC，IB/IH）+ G5（blackscholes，多核 CR）。
+> 访存）+ G4（SQLite eMMC，IB/IH）+ G5（blackscholes，多核 CR）；
+> 第三批：G6（TFLite 推理）+ G7（Redis+SQLite 混合，多路径并发）。
 > 说明：本批应用二进制改走**设备原生编译**（WSL 交叉编译环境 2026-09-11 出现
 > 0x800705aa 资源不足故障；设备自带 gcc，native 编译不依赖 WSL，且无需静态链接）。
 
@@ -17,6 +18,7 @@
 | `apps/src/xz-5.6.4.tar.gz`、`redis-7.2.5.tar.gz` | 应用源码（已入仓库，随 git 流转）                                   |
 | `apps/build_apps_device.sh`                     | 设备侧原生编译脚本（xz + redis-server/benchmark/cli）            |
 | `apps/build_apps.sh`                            | WSL 交叉编译脚本（WSL 恢复后的备选，产物为静态二进制）                       |
+| `apps/tflite_bench.py`                          | G6 推理循环脚本（校准 + 相位跑共用；依赖 tflite-runtime + numpy）          |
 
 ## 1. 部署（GitHub → fujian → BF2）
 
@@ -110,7 +112,7 @@ apps/bin/redis-cli -h 192.168.56.103 shutdown nosave    # 关服务
 ```bash
 # fujian 上：
 mkdir -p /tmp/bf2k/results
-scp root@192.168.100.2:/root/bf2k/g{1,2,3,4,5}_run*.csv* /tmp/bf2k/results/
+scp root@192.168.100.2:/root/bf2k/g{1,2,3,4,5,6,7}_run*.csv* /tmp/bf2k/results/
 # 再从 fujian 拉回 Windows，放 D:\bf2-collector\results\
 ```
 
@@ -222,3 +224,74 @@ python tools\split_path.py ^
   ```
 - 预期：8 核对称 A72_ACCESS、HNF_REQUESTS、L3 活动（多核共享 L3）；
   pcie/net 近零。
+
+## 12. G6 TFLite 推理（CR + 模型权重连续流式读入）三连跑
+
+### 12.1 一次性准备（fujian 下载 → 设备解包；约 20MB，不进仓库）
+
+```bash
+# fujian 上（有公网；三个文件约 18MB）：
+mkdir -p /tmp/g6 && cd /tmp/g6
+curl -LO https://files.pythonhosted.org/packages/f0/fc/ac705c3d95ef56810f43bfec3b9c485b696b6c7b2d2f58a9d2c1a744cf69/tflite_runtime-2.13.0-cp38-cp38-manylinux2014_aarch64.whl
+curl -LO https://files.pythonhosted.org/packages/25/6f/2586a50ad72e8dbb1d8381f837008a0321a3516dfd7cb57fc8cf7e4bb06b/numpy-1.24.4-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+curl -LO https://storage.googleapis.com/download.tensorflow.org/models/mobilenet_v1_2018_08_02/mobilenet_v1_1.0_224_quant.tgz
+tar xzf mobilenet_v1_1.0_224_quant.tgz     # 得到 mobilenet_v1_1.0_224_quant.tflite
+scp tflite_runtime-*.whl numpy-*.whl mobilenet_v1_1.0_224_quant.tflite \
+    root@192.168.100.2:/root/bf2k/apps/
+```
+
+```bash
+# 设备上（无需 pip/外网：wheel 就是 zip，用 python 自带模块解到 pylib）：
+cd /root/bf2k
+mkdir -p apps/pylib
+python3 -m zipfile -e apps/tflite_runtime-*.whl apps/pylib/
+python3 -m zipfile -e apps/numpy-*.whl apps/pylib/
+PYTHONPATH=/root/bf2k/apps/pylib python3 -c \
+    "import tflite_runtime.interpreter, numpy; print('ok', numpy.__version__)"
+```
+
+- 版本选型说明：设备 Python 3.8.10 + glibc 2.31，tflite-runtime 必须用
+  **2.13.0**——2.14 起 aarch64 wheel 换成 manylinux_2_34（要求 glibc>=2.34，
+  装不上）。2.13.0 是 manylinux2014（glibc>=2.17），安全。
+
+### 12.2 校准（相位外，~1 分钟）
+
+```bash
+cd /root/bf2k
+PYTHONPATH=/root/bf2k/apps/pylib python3 apps/tflite_bench.py \
+    apps/mobilenet_v1_1.0_224_quant.tflite 8 100
+# 看 per_iter=Xms → 相位跑迭代数 N ≈ 35000 / X（目标 app 时长 30-35s）
+```
+
+### 12.3 三连跑
+
+```bash
+cd /root/bf2k
+sudo ./run_phase.sh -c configs/app_full.conf -o g6_run1.csv -t 40 \
+    -a "PYTHONPATH=/root/bf2k/apps/pylib python3 /root/bf2k/apps/tflite_bench.py \
+        /root/bf2k/apps/mobilenet_v1_1.0_224_quant.tflite 8 N"
+# run2/run3 换名；N 用校准值，app 应 30-35s 自然退出
+```
+
+- 预期：A72_ACCESS/HNF_REQUESTS 中高、L3 MISSES 有（权重流式读入）、
+  IO_ACCESS 低；pcie/net 近零（无 NAD）。
+
+## 13. G7 Redis+SQLite 混合（NAD+IB 多路径并发）三连跑
+
+- 前置：redis-server 按 §4.1 起好。
+- 每跑双端配合，节奏同 G3：
+
+```bash
+# 设备上（先删旧库保证冷库；DB 在根分区 = eMMC，勿放 /tmp）：
+rm -f /root/bf2k/g7.db*
+sudo ./run_phase.sh -c configs/app_full.conf -o g7_run1.csv -t 40 \
+    -a "apps/bin/sqlite3 /root/bf2k/g7.db < apps/sqlite_workload.sql"
+
+# 屏幕出现 APP PHASE START 后，fujian 上立即：
+redis-benchmark -h 192.168.56.103 -p 6379 -t set,get -n 3000000 -c 64 -d 128 -q
+```
+
+- sqlite 约 32s 自然退出；benchmark 约 44-45s 会越出 40s 窗口（尾部满速流量
+  落在 post-idle）。与 G3 一样**无需重采**，出图时流量分段处理。
+- 预期：IO_ACCESS（eMMC/IB）与 pcie0/pcie1、net（NAD）同时点亮，
+  A72_ACCESS/L3 双应用叠加。
