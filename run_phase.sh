@@ -18,9 +18,11 @@
 #   -b BIND     cpu list for taskset (e.g. 4-7); default: no pinning
 #
 # The app is expected to be a single foreground command.  If it is
-# still running when its window expires, it is killed so the post-idle
-# segment stays clean.  Actual phase boundaries are recorded in the
-# log; split_path.py segments the CSV by those timestamps.
+# still running when its window expires, its whole process group is
+# killed (TERM then KILL) so the post-idle segment stays clean -
+# killing only the sh wrapper would orphan the app itself.  Actual
+# phase boundaries are recorded in the log; split_path.py segments
+# the CSV by those timestamps.
 set -u
 
 # Anchor everything to this script's directory so the working directory
@@ -60,18 +62,22 @@ sleep 1
 sleep $((PRE - 1))
 APP_START=$(date +%s)
 echo "[run_phase] APP PHASE START $(date '+%F %T')"
+# setsid: put the app in its own process group so the expiry kill can
+# take the app down with the wrapper (not just orphan it)
 if [ -n "$BIND" ]; then
-  taskset -c "$BIND" sh -c "$APPCMD" &
+  taskset -c "$BIND" setsid sh -c "$APPCMD" &
 else
-  sh -c "$APPCMD" &
+  setsid sh -c "$APPCMD" &
 fi
 APP_PID=$!
 
 while kill -0 $APP_PID 2>/dev/null; do
   NOW=$(date +%s)
   if [ $((NOW - APP_START)) -ge "$APP" ]; then
-    kill $APP_PID 2>/dev/null
-    echo "[run_phase] app window expired, killed"
+    kill -TERM -- "-$APP_PID" 2>/dev/null
+    sleep 1
+    kill -KILL -- "-$APP_PID" 2>/dev/null
+    echo "[run_phase] app window expired, killed app process group"
     break
   fi
   sleep 1

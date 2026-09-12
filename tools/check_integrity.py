@@ -280,6 +280,34 @@ def contrast(pairs, ref_header):
                          n_app if n_app else "*"))
 
 
+def check_background(pairs, ref_header):
+    """Flag runs whose pre-idle median is far above the group minimum
+    (leftover/orphan app processes contaminate the idle background)."""
+    cols = [i for i, n in enumerate(ref_header)
+            if n in ("tile_a72_access", "tile_hnf_requests")]
+    per = {}
+    for p in pairs:
+        rows = load_rows(p)[1]
+        ph = parse_phase(p + ".phase.log")
+        if not ph:
+            continue
+        g = os.path.basename(p)[:2]
+        pre = [r for r in rows
+               if ph["start"] + 1 <= int(r[0]) <= ph["app_start"]]
+        for c in cols:
+            vals = [v for v in (num(r[c]) for r in pre) if v is not None]
+            if vals:
+                per.setdefault((g, ref_header[c]), []).append(
+                    (os.path.basename(p), median(vals)))
+
+    print("\n=== pre-idle background consistency ===")
+    for (g, name), lst in sorted(per.items()):
+        m = min(v for _, v in lst)
+        for f, v in lst:
+            mark = "  <-- contaminated?" if m > 0 and v > 5 * m else ""
+            print("%-28s %-4s %-12s %12.0f%s" % (name, g, f, v, mark))
+
+
 def main():
     pairs = sorted(glob.glob(os.path.join(RES, "g*_run*.csv")))
     if not pairs:
@@ -309,6 +337,7 @@ def main():
             good.append(p)
 
     contrast(pairs, ref_header)
+    check_background(pairs, ref_header)
     print("\n=== summary: %d/%d runs pass all structural checks ==="
           % (len(good), len(pairs)))
     if len(good) < len(pairs):

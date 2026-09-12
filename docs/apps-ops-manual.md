@@ -51,9 +51,14 @@ sudo ./run_phase.sh -c configs/app_full.conf -o g1_run1.csv -t 40 \
 # 重复 run2、run3（把 -o 换名即可）
 ```
 
-- 每跑约 50s（5 空载 + 40 应用窗口 + 5 空载）；`xz -T 8` 在 8 核 A72 上压缩 1GB
-  约 15-30s，实际应用时长以相位日志为准（split_path.py 按实际起止切分）。
-- 每跑结束核对结尾的 `[run_phase] done: ... app Ns ...`：app 应约 15-30s；
+- 每跑约 50s（5 空载 + 40 应用窗口 + 5 空载）。xz 压 1GB 随机数据（-9 -T 8）
+  实测全程约 55-65s，40s 窗口会中途截断：应看到
+  `[run_phase] app window expired, killed app process group`，app=40s，
+  属正常（采集到的就是 40s 完整压缩时段）。
+- **跑前先确认没有残留 xz**：`pgrep -a xz`（有输出就 `pkill -x xz`）。
+  手动校准/试跑过 xz 的话要等它彻底结束（约 1 分钟）再开始相位跑，
+  否则残留压缩会污染下一跑的 pre 窗口。
+- 每跑结束核对结尾的 `[run_phase] done: ... app Ns ...`：app 应 =40s；
   若是 1s 说明 xz 秒退，看 §8 的 xz 条目。
 - 跑完检查：`ls g1_run*.csv g1_run*.csv.phase.log`（3 份 CSV + 3 份相位日志）。
 
@@ -152,6 +157,10 @@ python tools\split_path.py ^
   而非真身 ELF。已修复（改走 `make install` + 静态链接），设备上重跑
   `bash apps/build_apps_device.sh xz` 即可，修复版会打印
   `statically linked` 和版本行作自检。
+- post/pre 空载窗口出现高活动（如 A72_ACCESS 60M+/s 且相位日志显示 app
+  已被截断）：旧版 run_phase 到期只杀 sh 包装进程，应用本体成孤儿继续跑。
+  新版已改为整进程组击杀（setsid + kill -- -PID），同步部署后即生效；
+  跑前也确认 `pgrep -a xz` 为空。
 - redis 客户端连不上：fujian `ping 192.168.56.103` 先验证 56.x 管道；再
   `redis-cli -h 192.168.56.103 ping`。
 - CSV 行数远少于窗口秒数：贴 `tail -5` 输出给 Claude。
