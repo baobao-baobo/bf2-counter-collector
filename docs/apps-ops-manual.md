@@ -279,11 +279,16 @@ sudo ./run_phase.sh -c configs/app_full.conf -o g6_run1.csv -t 40 \
 ## 13. G7 Redis+SQLite 混合（NAD+IB 多路径并发）三连跑
 
 - 前置：redis-server 按 §4.1 起好。
+- **纪律：rm 必须在每一次 run_phase 之前单独执行并确认删净**。旧库残留会让
+  CREATE TABLE / INSERT / CREATE INDEX 秒级报错，sqlite 只剩 SELECT/JOIN/
+  DELETE/VACUUM 尾巴在旧数据上跑 ~8s 就退出（app=8s，INSERT 从未发生）。
+  第一次采集（2026-09-12）即栽在旧库残留上，三跑全部 app=8s 作废重采。
 - 每跑双端配合，节奏同 G3：
 
 ```bash
 # 设备上（先删旧库保证冷库；DB 在根分区 = eMMC，勿放 /tmp）：
 rm -f /root/bf2k/g7.db*
+ls -l /root/bf2k/g7.db*     # 必须报 No such file；否则就是没删干净，停！
 sudo ./run_phase.sh -c configs/app_full.conf -o g7_run1.csv -t 40 \
     -a "apps/bin/sqlite3 /root/bf2k/g7.db < apps/sqlite_workload.sql"
 
@@ -291,6 +296,13 @@ sudo ./run_phase.sh -c configs/app_full.conf -o g7_run1.csv -t 40 \
 redis-benchmark -h 192.168.56.103 -p 6379 -t set,get -n 3000000 -c 64 -d 128 -q
 ```
 
+- 每跑结束后**看一眼 sqlite 的输出**：正常应 .timer 从 INSERT ~20s 起步、
+  全程 ~32s 自然退出；若出现 "table t already exists" / "UNIQUE constraint
+  failed" 报错或 .timer 全是毫秒级，说明跑到了旧库上，该跑作废。
+- 可选诊断（1 分钟，验证旧库理论）：`df -h / /tmp` +
+  `apps/bin/sqlite3 /root/bf2k/g7.db 'select count(*) from t;'`
+  —— 表存在且行数远小于 2200000 即旧库残留铁证；`rm -f /root/bf2k/g4.db*`
+  顺手清掉 G4 旧库腾 eMMC 空间。
 - sqlite 约 32s 自然退出；benchmark 约 44-45s 会越出 40s 窗口（尾部满速流量
   落在 post-idle）。与 G3 一样**无需重采**，出图时流量分段处理。
 - 预期：IO_ACCESS（eMMC/IB）与 pcie0/pcie1、net（NAD）同时点亮，
