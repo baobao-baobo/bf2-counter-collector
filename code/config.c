@@ -1144,6 +1144,7 @@ int config_dump_template(FILE *fp)
         "[net]\n"
         "enabled  = true\n"
         "# interfaces = eth0, eth1   # optional filter; empty = all\n"
+        "# (when set, adds <iface>_rx_bytes/<iface>_tx_bytes columns)\n"
         "\n"
         "[gic]\n"
         "enabled  = false\n");
@@ -1387,8 +1388,13 @@ int config_write_csv_header(FILE *fp, const bf2_config_t *cfg,
         fputs(",cpu_util_pct,cpu_min_pct,cpu_max_pct,cpu_avg_pct", fp);
     if (cfg->mem.enabled && p->have_mem)
         fputs(",mem_total_kb,mem_used_kb,mem_util_pct", fp);
-    if (cfg->net.enabled && p->have_net)
+    if (cfg->net.enabled && p->have_net) {
         fputs(",net_rx_bytes,net_tx_bytes", fp);
+        /* per-interface columns when an explicit filter is configured */
+        for (i = 0; i < cfg->net.n_ifaces; i++)
+            fprintf(fp, ",%s_rx_bytes,%s_tx_bytes",
+                    cfg->net.ifaces[i], cfg->net.ifaces[i]);
+    }
     if (cfg->gic.enabled && p->have_gic) {
         for (i = 0; i < cfg->gic.n_events; i++)
             fprintf(fp, ",gic_%s", cfg->gic.events[i].colname);

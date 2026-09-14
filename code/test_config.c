@@ -771,6 +771,44 @@ static void test_net_ifaces(void)
                         err, sizeof(err)) == -1);
 }
 
+static void test_net_iface_columns(void)
+{
+    bf2_config_t cfg;
+    char err[CFG_ERR_MAX];
+    char *hdr;
+
+    /* explicit filter: per-interface columns after the aggregate,
+     * in config order (the E1 eSwitch port set) */
+    CHECK(parse_resolve("[net]\ninterfaces = pf0hpf, pf1hpf, p1, "
+                        "en3f1pf1sf0, enp3s0f1s0\n", &cfg, err,
+                        sizeof(err)) == 0);
+    CHECK(cfg.net.n_ifaces == 5);
+    hdr = render_header(&cfg);
+    CHECK(hdr != NULL);
+    if (hdr != NULL) {
+        CHECK(strstr(hdr, ",net_rx_bytes,net_tx_bytes,"
+                      "pf0hpf_rx_bytes,pf0hpf_tx_bytes,"
+                      "pf1hpf_rx_bytes,pf1hpf_tx_bytes,"
+                      "p1_rx_bytes,p1_tx_bytes,"
+                      "en3f1pf1sf0_rx_bytes,en3f1pf1sf0_tx_bytes,"
+                      "enp3s0f1s0_rx_bytes,enp3s0f1s0_tx_bytes\n")
+              != NULL);
+        free(hdr);
+    }
+
+    /* no filter: header unchanged (parity with default configs) */
+    CHECK(parse_resolve("[net]\nenabled = true\n", &cfg, err,
+                        sizeof(err)) == 0);
+    CHECK(cfg.net.n_ifaces == 0);
+    hdr = render_header(&cfg);
+    CHECK(hdr != NULL);
+    if (hdr != NULL) {
+        CHECK(strstr(hdr, ",net_rx_bytes,net_tx_bytes\n") != NULL);
+        CHECK(strstr(hdr, "pf0hpf_rx_bytes") == NULL);
+        free(hdr);
+    }
+}
+
 int main(void)
 {
     test_defaults_resolve();
@@ -788,6 +826,7 @@ int main(void)
     test_l3_rotation();
     test_paper52();
     test_net_ifaces();
+    test_net_iface_columns();
 
     remove("test_tmp.conf");   /* don't leave the scratch file behind */
 

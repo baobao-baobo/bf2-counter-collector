@@ -165,6 +165,8 @@ static int   g_net_ok = 0;
 static char  g_ifname[MAX_IFACES][32];
 static unsigned long long g_if_prev_rx[MAX_IFACES];
 static unsigned long long g_if_prev_tx[MAX_IFACES];
+static unsigned long long g_if_drx[MAX_IFACES];   /* per-iface deltas, */
+static unsigned long long g_if_dtx[MAX_IFACES];   /* written as columns */
 static int   g_nifaces = 0;
 
 /* ================================================================== */
@@ -1061,11 +1063,11 @@ static int net_init(void)
             char path[MAX_PATH_LEN];
             snprintf(path, sizeof(path), "/sys/class/net/%s",
                      g_cfg.net.ifaces[i]);
-            if (!sysfs_exists(path)) {
+            if (!sysfs_exists(path))
                 fprintf(stderr, "[WARN] interface '%s' not found, "
-                        "skipped\n", g_cfg.net.ifaces[i]);
-                continue;
-            }
+                        "zero columns\n", g_cfg.net.ifaces[i]);
+            /* still register it: the per-interface columns must stay
+             * aligned with the header, missing ifaces report 0 delta */
             net_add_iface(g_cfg.net.ifaces[i]);
         }
         return (g_nifaces > 0) ? 0 : -1;
@@ -1107,8 +1109,10 @@ static void net_sample(unsigned long long *rx_delta,
         if (file_read_all(path, buf, sizeof(buf)) >= 0)
             tx = strtoull(buf, NULL, 10);
 
-        *rx_delta += (rx >= g_if_prev_rx[i]) ? (rx - g_if_prev_rx[i]) : 0;
-        *tx_delta += (tx >= g_if_prev_tx[i]) ? (tx - g_if_prev_tx[i]) : 0;
+        g_if_drx[i] = (rx >= g_if_prev_rx[i]) ? (rx - g_if_prev_rx[i]) : 0;
+        g_if_dtx[i] = (tx >= g_if_prev_tx[i]) ? (tx - g_if_prev_tx[i]) : 0;
+        *rx_delta += g_if_drx[i];
+        *tx_delta += g_if_dtx[i];
         g_if_prev_rx[i] = rx;
         g_if_prev_tx[i] = tx;
     }
@@ -1297,11 +1301,18 @@ static void row_mem(FILE *fp, int sampled, unsigned long long total,
 static void row_net(FILE *fp, int sampled, unsigned long long rx,
                     unsigned long long tx)
 {
+    int i;
+
     if (!g_cfg.net.enabled || !g_net_ok) return;
-    if (sampled)
+    if (sampled) {
         fprintf(fp, ",%llu,%llu", rx, tx);
-    else
+        for (i = 0; i < g_cfg.net.n_ifaces; i++)
+            fprintf(fp, ",%llu,%llu", g_if_drx[i], g_if_dtx[i]);
+    } else {
         fprintf(fp, ",,");
+        for (i = 0; i < g_cfg.net.n_ifaces; i++)
+            fprintf(fp, ",,");
+    }
 }
 
 /* ================================================================== */
