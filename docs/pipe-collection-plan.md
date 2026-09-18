@@ -290,16 +290,16 @@ ovs-ofctl del-flows ovsbr1 "in_port=pf1hpf"
 
 **坑与纪律**：同 match 的 `add-flow` 是**替换**（计数清零）——本轮执行时第二次 add-flow 把计数清了，最后 dump 只剩 74 包背景（判读不受影响，但 M2 跑窗口期间**不得重复加规则**）；本轮规则已删，设备已恢复干净。
 
-**M2 最小采集器**（已交付 `tools/collect_pipe.sh`）：每口一条 priority=1 计数规则，每秒 `dump-flows` 轮询 n_packets/n_bytes 写 CSV（bash、ASCII、设备端直跑，退出时自动删规则）。（⚠️ 9/15 修正：初版 poll 的 `grep "in_port=$p[ ,]"` 匹配不上 dump-flows 带引号的输出 `in_port="p1"` 会全 0——已改为 `grep -E "in_port=\"?$p\"?([, ]|$)"`；部署前确认拿到修正版。）
+**M2 最小采集器**（`tools/collect_pipe.sh`，**9/17 已按 P1 补验改造**）：口径分层——wire 口（`-w` 列表，默认 p1）读 sysfs 物理口计数（rx_packets/rx_bytes，对 NHD 100% 可靠）；Arm 面口（pf1hpf/en3f1pf1sf0）仍挂 priority=1 计数规则、每秒 `dump-flows` 轮询 n_packets/n_bytes（对 Arm 终接流量 100% 成立）。bash、ASCII、设备端直跑；OVS 规则退出时自动删。⚠️ 部署用 fujian `git pull` + `bash deploy.sh`（deploy 只传 git 跟踪文件——改造版须先提交推送）。
 
 **M2 验证操作单**：
 
-1. 部署：把 `tools/collect_pipe.sh` 传到 BF2 `/root/bf2k/`（fujian 中转：`scp tools/collect_pipe.sh root@192.168.100.2:/root/bf2k/`）；【BF2】`chmod +x /root/bf2k/collect_pipe.sh && bash -n /root/bf2k/collect_pipe.sh`（应无输出）。
+1. 部署（改造版须先 git 提交推送）：fujian `git pull` + `bash deploy.sh`（只传 git 跟踪文件）；【BF2】`chmod +x /root/bf2k/collect_pipe.sh && bash -n /root/bf2k/collect_pipe.sh`（应无输出）。
 2. 【BF2】起采集 50s：`cd /root/bf2k && sudo ./collect_pipe.sh -d 50 -o pipe_m2.csv`
 3. 【fujian】屏幕开始刷行后 ⏱（10 秒内）打流：`iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G`
 4. 【BF2】等自然结束（约 50 秒），`ls -l /root/bf2k/pipe_m2.csv` 非零。
 5. 回传 `pipe_m2.csv`。（可选双侧对照：同窗再跑一次 `sudo ./code/collect_all -c configs/e1_esw.conf -d 50 -o e1_m2_check.csv`，二者选一即可。）
-6. 判读（Claude）：pf1hpf_bytes 流量段增量 ≈ 8.7GB、p1/en3f1pf1sf0 列 ≈ 背景 → **M2 验收通过** → M3（L4 分类 pipe：加 5201/6379/6380 端口）或直接恢复 E1 并行采集。
+6. 判读（Claude）：pf1hpf_bytes 流量段增量 ≈ 8.7GB（OVS 规则口径，Arm 终接流量 100% 成立）、p1 列 = sysfs 物理口 rx 增量（此轮应为背景级，56.x 流量不经 p1）、en3f1pf1sf0 ≈ 背景 → 与 §5.6 Part C（helong 5s×10G，p1 列增量 ≈5.8GB）同窗合判 → **M2 验收通过** → M3（L4 分类 pipe：加 5201/6379/6380 端口）或直接恢复 E1 并行采集。
 - **备选 B（无实验室机器）**：fujian 单机双 netns + macvlan（不动 56.11/eno1 原有配置）：
 
 ```bash
@@ -407,7 +407,7 @@ sudo ./collect_pipe.sh -d 50 -o pipe_p1.csv -p p1
 # 4.【我们的 BF2】等 50s 自然结束，回传 pipe_p1.csv
 ```
 
-> 判读：p1_bytes 流量段增量 ≈ 实际吞吐字节（iperf3 报告的实际吞吐折算，10G 链路 ≈ 11.6GB）→ **p1 口 P1 计数成立，NHD 数据通道打通**；p1_bytes ≈ 0 → 流量没进 p1（桥/姿势问题），回传笔记。
+> 判读：p1_bytes 流量段增量 ≈ 实际吞吐字节（iperf3 报告的实际吞吐折算，10 秒 ≈ 12–13GB，Part B 实测 13.1GB）→ **p1 口物理口计数成立（NHD 采集口径定案）**；p1_bytes ≈ 0 → 流量没进 p1（桥/姿势问题），回传笔记。
 > ⚠️ 纪律：同 §5.5——窗口期间不得重复加规则（collect_pipe.sh 退出自动清理，无需手动删）。
 > ⚠️ 打招呼：这是两台服务器之间的互联链路，打满速流之前跟师兄确认链路上没有他人业务（我们抓包只见 BPDU/组播背景，仍以口头确认为准）。
 
@@ -427,7 +427,9 @@ ovs-ofctl dump-flows ovsbr1
 ovs-ofctl del-flows ovsbr1 "in_port=p1"
 ```
 
-> 判读：priority=1,in_port="p1" 行的 n_bytes ≈ 6.5GB（5 秒 × 该链路速率）→ **P1 在 p1 成立**，三层对照（规则≈tc≈phy）闭环。
+> **补验实测（9/17 已执行）→ P1 对 NHD 判死（新形态），P1b/物理口仍成立**：helong 全速 10Gbps×5s=5.82GB（接收端 5.82GB 全额），规则只计 n_bytes=1,317,933,394 ≈ **22.6%**；且 1.32GB÷10Gbps ≈ **1.1 秒** = 恰好流量开始后前 ~1.1s 的量——规则计数在 ~1.1s 处冻结。机理：规则加表后先走内核 datapath（计数正常）→ **offload 完成、eSwitch 硬件直转接管 wire→host** → 流量不再经内核 → dump-flows 统计停止增长、**HW 段统计不回流 OVS**。旁证：①前窗 1.33GB = 同次测试软件段 1.32GB + 19min 背景 16.4MB（≈114 pkt/s，与 catch-all 背景 116 pkt/s 吻合）；②iperf 第 2 秒 48 次重传 + cwnd 856→732KB 下探 = offload 切换瞬间丢包。
+> **定性修正**：§5.5 的"三层一致/统计回流成立"是在 **Arm 终接流量**（56.x，全部经内核）下测的，推广到 NHD 是错误外推。**P1（OVS 规则轮询）只对 Arm 终接流量（NAD）成立；对 NHD 只计 offload 前软件段（实测 ~23%，随 offload 延迟浮动）**。不受影响：Part B 的 tc in_hw=13.1GB 证明 **tc 能读硬件计数（P1b 对 NHD 成立）**；E1 每口 sysfs 列（物理口/vport 计数器）与 NAD/NHD 主图数据全部有效。附带数据点：**offload 编程延迟 ≈1.1s**，期间 10Gbps 经 Arm 内核慢路径转发未丢包。
+> **修复（2026-09-17 已改造 collect_pipe.sh，待提交部署）**：wire 口（p1）改读 sysfs 物理口计数（/sys/class/net/p1/statistics/rx_bytes，已裁定=rx_bytes_phy）；Arm 面口保留 OVS 规则作互校；M2 验收标准改 p1 列 ≈5.8GB；M3 的 L4 分类 NHD 侧不可信 → 留 P2/P3。
 
 **手动组合块（collect_pipe.sh 未部署时替代第 2 步，其余同上）**：
 
