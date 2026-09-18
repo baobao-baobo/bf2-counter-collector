@@ -23,8 +23,10 @@
 #
 # Note: ovs-ofctl add-flow with the same match REPLACES the rule and resets
 # its counters. Do not re-add rules while a run is in progress.
-# Note: dump-flows prints port names quoted (in_port="p1"); the poll grep
-# below accepts both quoted and unquoted forms.
+# Note: dump-flows prints ports either by name (in_port="p1", quoted) or by
+# number (in_port=9) depending on OVS build/config (observed both, 9/17 vs
+# 9/18). The poll therefore sends the in_port match server-side and parses
+# only n_packets/n_bytes, so both output forms work.
 
 BRIDGE=ovsbr1
 PORTS="p1,pf1hpf,en3f1pf1sf0"
@@ -113,7 +115,7 @@ while true; do
             pkts=$(cat "/sys/class/net/$p/statistics/rx_packets" 2>/dev/null)
             bytes=$(cat "/sys/class/net/$p/statistics/rx_bytes" 2>/dev/null)
         else
-            stats=$(ovs-ofctl dump-flows "$BRIDGE" 2>/dev/null | grep -E "in_port=\"?$p\"?([, ]|$)" | head -1)
+            stats=$(ovs-ofctl dump-flows "$BRIDGE" "in_port=$p" 2>/dev/null | head -1)
             pkts=$(echo "$stats" | grep -o 'n_packets=[0-9]*' | head -1 | cut -d= -f2)
             bytes=$(echo "$stats" | grep -o 'n_bytes=[0-9]*' | head -1 | cut -d= -f2)
         fi

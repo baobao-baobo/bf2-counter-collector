@@ -18,8 +18,8 @@
 |---|---|---|---|
 | B1 | fujian：`git pull` + `bash deploy.sh`（路径保持原样 → 设备上是 **tools/collect_pipe.sh**） | 用户 | /root/bf2k/tools/collect_pipe.sh 有 `WIRE_PORTS` 字样 |
 | B2 | BF2：`chmod +x` + `bash -n /root/bf2k/tools/collect_pipe.sh` | 用户 | 无输出 |
-| B3 | **pipe-collection-plan.md §5.5 第 5 步**（第一路）：fujian `iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G` | 用户 | pf1hpf 列（OVS 规则）增量 ≈8.7GB；en3f1pf1sf0 ≈ 背景；回传 pipe_m2.csv |
-| B4 | **pipe-collection-plan.md §5.5 第 6 步**（第二路，同 50s 窗）：helong 的 BF2 `iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 5 -b 10G` | 用户 | p1 列（sysfs 物理口）增量 ≈5.8GB；回传 CSV |
+| B3 | **pipe-collection-plan.md §5.5 第 5 步**（第一路）：fujian `iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G` | 用户 | ✅ 机制通过（9/18 M5）：-d 300 大窗流量入窗，规则 in_port=pf1hpf 计 7.817GB = 端口 rx 增量 1:1；NAD 闭环 pf1hpf→SF→Arm + ACK 反向（SF 列 ~10MB）全测出；catch-all 只吃背景；p1 纯背景 ✓。**脚本 bug 坐实**：pipe_m5.csv 列全 0 vs diff 铁证规则计 7.817GB（dump-flows 输出数字端口 vs 脚本按名字 grep）。修复已备（server-side match，bash -n 过），待批准提交 → 部署 + 一轮收尾验证 |
+| B4 | **pipe-collection-plan.md §5.5 第 6 步**（第二路，同窗）：helong 的 BF2 `iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 5 -b 10G` | 用户 | ✅ 9/18 通过：p1 列 6.31GB/4.157M 包 = 1518B/包 标准线帧，1:1 对 iperf 5.60GiB×1.049 帧开销；ethtool p1 Speed=**100G** 记录在案；1782B 疑点定案=截尾+计数器异步刷新采样失真（判读看全窗汇总） |
 | B5 | Claude 判读 → Task #30、#39 关闭 | Claude | 两列均过 → M2 通过；p1 判死新形态与 Part B 13.1GB 对照记录在案 |
 
 ## C. memrand 修复版二进制回拉（用户 fujian 操作 + 本地线）
@@ -64,4 +64,4 @@
 
 ---
 
-**当前最前序动作**：A3（批准提交）→ B1–B5（M2 部署验收）。C1 与 B 无依赖，可并行做。
+**当前最前序动作**：B3 补跑（56.x 单路，待用户答复 fujian 侧情况）→ B5 判读 → 关 Task #30/#39。
