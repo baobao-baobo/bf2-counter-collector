@@ -292,14 +292,18 @@ ovs-ofctl del-flows ovsbr1 "in_port=pf1hpf"
 
 **M2 最小采集器**（`tools/collect_pipe.sh`，**9/17 已按 P1 补验改造**）：口径分层——wire 口（`-w` 列表，默认 p1）读 sysfs 物理口计数（rx_packets/rx_bytes，对 NHD 100% 可靠）；Arm 面口（pf1hpf/en3f1pf1sf0）仍挂 priority=1 计数规则、每秒 `dump-flows` 轮询 n_packets/n_bytes（对 Arm 终接流量 100% 成立）。bash、ASCII、设备端直跑；OVS 规则退出时自动删。⚠️ 部署用 fujian `git pull` + `bash deploy.sh`（deploy 只传 git 跟踪文件——改造版须先提交推送）。
 
-**M2 验证操作单**：
+**M2 验证操作单（9/18 修订：完整自含流程，两路打流在同一 50s 窗口内，无需再看 §5.6）**：
 
-1. 部署（改造版须先 git 提交推送）：fujian `git pull` + `bash deploy.sh`（只传 git 跟踪文件）；【BF2】`chmod +x /root/bf2k/collect_pipe.sh && bash -n /root/bf2k/collect_pipe.sh`（应无输出）。
-2. 【BF2】起采集 50s：`cd /root/bf2k && sudo ./collect_pipe.sh -d 50 -o pipe_m2.csv`
-3. 【fujian】屏幕开始刷行后 ⏱（10 秒内）打流：`iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G`
-4. 【BF2】等自然结束（约 50 秒），`ls -l /root/bf2k/pipe_m2.csv` 非零。
-5. 回传 `pipe_m2.csv`。（可选双侧对照：同窗再跑一次 `sudo ./code/collect_all -c configs/e1_esw.conf -d 50 -o e1_m2_check.csv`，二者选一即可。）
-6. 判读（Claude）：pf1hpf_bytes 流量段增量 ≈ 8.7GB（OVS 规则口径，Arm 终接流量 100% 成立）、p1 列 = sysfs 物理口 rx 增量（此轮应为背景级，56.x 流量不经 p1）、en3f1pf1sf0 ≈ 背景 → 与 §5.6 Part C（helong 5s×10G，p1 列增量 ≈5.8GB）同窗合判 → **M2 验收通过** → M3（L4 分类 pipe：加 5201/6379/6380 端口）或直接恢复 E1 并行采集。
+1. 部署：【fujian】`git pull` + `bash deploy.sh`（只传 git 跟踪文件、路径保持原样）；【BF2】`chmod +x /root/bf2k/tools/collect_pipe.sh && bash -n /root/bf2k/tools/collect_pipe.sh`（应无输出）。
+2. 服务端准备：【BF2】Arm 侧服务端若已停：`/root/bf2k/bench/bin/iperf3 -s -p 5202 -D`；【fujian】`sudo ip addr add 10.99.99.1/24 dev enp94s0f1np1` + `iperf3 -s -B 10.99.99.1 -p 5201 -D`。
+3. 客户端准备：【helong 的 BF2】（helong 上 `ssh root@192.168.100.2`）`ip addr add 10.99.99.3/24 dev p1`（报已存在则跳过）；`ping -c 2 10.99.99.1` 确认通路（不通 → 回 §5.6 Part A 兜底）。
+4. 起采集 60s：【BF2】`cd /root/bf2k && sudo ./tools/collect_pipe.sh -d 60 -o pipe_m2.csv`（两路 10+5s 留足余量；9/18 首轮用 -d 50 时第二路起在窗口尾部被截断）
+5. ⏱ 第一路（屏幕开始刷行后）：【fujian】`iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G`
+6. ⏱ 第二路（第一路结束后立刻）：【helong 的 BF2】`/root/iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 5 -b 10G`
+7. 等 60s 自然结束，【BF2】`ls -l /root/bf2k/pipe_m2.csv` 非零。（可选双侧对照：同窗再跑 `sudo ./code/collect_all -c configs/e1_esw.conf -d 50 -o e1_m2_check.csv`，与主验收二选一即可。）
+8. 回传 `pipe_m2.csv`（fujian 中转 scp）。
+
+判读（Claude）：pf1hpf 列增量 ≈ 8.7GB（OVS 规则口径，Arm 终接流量 100% 成立，对应第 5 步 10s 段）；p1 列 = sysfs 物理口 rx 增量，第 6 步 5s 段 ≈ 5.8GB、第 5 步段应 ≈ 背景（56.x 流量不经 p1）；en3f1pf1sf0 ≈ 背景 → **M2 验收通过** → M3（L4 分类 pipe：加 5201/6379/6380 端口）或直接恢复 E1 并行采集。
 - **备选 B（无实验室机器）**：fujian 单机双 netns + macvlan（不动 56.11/eno1 原有配置）：
 
 ```bash
@@ -399,7 +403,7 @@ timeout 10 tcpdump -i p1 -nn -e arp | grep -i 10.99.99
 
 # 2.【我们的 BF2】开采集（仅 p1 一口；collect_pipe.sh 已部署则用它，否则用下方手动组合块）
 cd /root/bf2k
-sudo ./collect_pipe.sh -d 50 -o pipe_p1.csv -p p1
+sudo ./tools/collect_pipe.sh -d 50 -o pipe_p1.csv -p p1
 
 # 3.【helong 的 BF2】屏幕开始刷行后 ⏱（10 秒内）打流
 /root/iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 10 -b 10G   # -b 按 Part A 记的 Speed 定

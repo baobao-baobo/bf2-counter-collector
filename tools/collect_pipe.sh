@@ -17,7 +17,9 @@
 # Usage:  sudo ./collect_pipe.sh -d 50 -o pipe.csv [-p p1,pf1hpf,en3f1pf1sf0] [-w p1] [-b ovsbr1]
 # Output: CSV, one row per second, cumulative counters:
 #   ts,<port>_pkts,<port>_bytes,<port2>_pkts,<port2>_bytes,...
-# OVS counting rules (Arm-face ports only) are removed on exit (trap).
+# Each row is also echoed to the terminal (tee), so the refresh cadence is
+# visible while the run is in progress. OVS counting rules (Arm-face ports
+# only) are removed on exit (trap).
 #
 # Note: ovs-ofctl add-flow with the same match REPLACES the rule and resets
 # its counters. Do not re-add rules while a run is in progress.
@@ -97,6 +99,8 @@ trap cleanup EXIT
     printf "\n"
 } > "$OUT"
 
+echo "collect_pipe: $DUR s, ports: $PORTS, output: $OUT"
+
 # Poll loop
 start=$(date +%s)
 while true; do
@@ -115,7 +119,7 @@ while true; do
         fi
         line="$line,${pkts:-0},${bytes:-0}"
     done
-    echo "$line" >> "$OUT"
+    echo "$line" | tee -a "$OUT"
     sleep "$POLL"
 done
 

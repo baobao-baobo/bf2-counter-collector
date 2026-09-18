@@ -16,20 +16,20 @@
 
 | # | 事项 | 执行人 | 验收 |
 |---|---|---|---|
-| B1 | fujian：`git pull` + `bash deploy.sh`（替代 scp 单文件） | 用户 | /root/bf2k/collect_pipe.sh 有 `WIRE_PORTS` 字样 |
-| B2 | BF2：`chmod +x` + `bash -n /root/bf2k/collect_pipe.sh` | 用户 | 无输出 |
-| B3 | §5.5 M2 验收：起采集 50s，fujian `iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G` | 用户 | pf1hpf 列（OVS 规则）增量 ≈8.7GB；en3f1pf1sf0 ≈ 背景；回传 pipe_m2.csv |
-| B4 | §5.6 Part C 同窗验收：helong `iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 5 -b 10G`（fujian 先挂 10.99.99.1/24） | 用户 | p1 列（sysfs 物理口）增量 ≈5.8GB；回传 CSV |
+| B1 | fujian：`git pull` + `bash deploy.sh`（路径保持原样 → 设备上是 **tools/collect_pipe.sh**） | 用户 | /root/bf2k/tools/collect_pipe.sh 有 `WIRE_PORTS` 字样 |
+| B2 | BF2：`chmod +x` + `bash -n /root/bf2k/tools/collect_pipe.sh` | 用户 | 无输出 |
+| B3 | **pipe-collection-plan.md §5.5 第 5 步**（第一路）：fujian `iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G` | 用户 | pf1hpf 列（OVS 规则）增量 ≈8.7GB；en3f1pf1sf0 ≈ 背景；回传 pipe_m2.csv |
+| B4 | **pipe-collection-plan.md §5.5 第 6 步**（第二路，同 50s 窗）：helong 的 BF2 `iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 5 -b 10G` | 用户 | p1 列（sysfs 物理口）增量 ≈5.8GB；回传 CSV |
 | B5 | Claude 判读 → Task #30、#39 关闭 | Claude | 两列均过 → M2 通过；p1 判死新形态与 Part B 13.1GB 对照记录在案 |
 
 ## C. memrand 修复版二进制回拉（用户 fujian 操作 + 本地线）
 
 | # | 事项 | 状态 | 验收 |
 |---|---|---|---|
-| C1 | fujian：`scp root@192.168.100.2:/root/bf2k/bench/bin/memrand /tmp/memrand.fixed` | ⏳ | 文件存在 |
-| C2 | Windows：`scp fujian:/tmp/memrand.fixed D:\bf2-collector\bench\bin\memrand`（覆盖） | ⏳ | — |
-| C3 | Claude 验证（设备已冒烟 31.8M/10s；README 已带 stamp 偏移 8/写模式 stride≥16 说明） | ⏳ | 无段错误即过 |
-| C4 | git 提交（待批准） | ⏳ | 无 Co-Authored-By |
+| C1 | **BF2 原地重建**：`gcc -O2 -static -o bin/memrand memrand.c` + 冒烟 | ✅ 9/18 | 冒烟通过：write 模式 31.8M 次/10s、无段错误 |
+| C2 | 回传二进制 + 源码（results/memrand.fixed2 + memrand_fixed.c） | ✅ 9/18 | — |
+| C3 | Claude 验证 + 落位 | ✅ 9/18 | 哈希 2604b059==设备、ELF AArch64 ET_EXEC、源码与操作单 §0.5 逐字节一致；已放 bench/bin/memrand + bench/src/memrand.c（src 在 .gitignore，提交需 -f） |
+| C4 | git 提交（已批准）：bench/bin/memrand + bench/src/memrand.c（-f）+ bench/README.md | ✅ 9/18 bf8a891 | 已推送；deploy 从此铺修复版 |
 
 ## D. Task #40 饱和标定（设备线，docs/saturation-calibration-opsheet.md）
 
