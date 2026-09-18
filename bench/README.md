@@ -91,10 +91,21 @@ sudo ./run_bench.sh p7 1   # iperf3（网络，可选）
 bin/memrand -s 1024 -b 64 -d 60   # 1GB 工作集 >> LLC，近乎全 miss（默认方案）
 bin/memrand -s 4    -b 64 -d 60   # 4MB 工作集，可装进 L3，局部性保留
 bin/memrand -s 1024 -b 4096 -d 60 # 4KB 步长：跨页走，压 TLB
-bin/memrand -s 512  -b 64 -d 30 -w  # 写模式
+bin/memrand -s 512  -b 64 -d 30 -w  # 写模式（stride >= 16 才可用）
 ```
 
 `sink` 行为保证不会被打乱优化；输出两行摘要（GB/s 与 ns/access）。
+
+> ⚠️ **2026-09-17 写模式段错误已修**：旧版把 stamp 写进块首 8 字节，
+> 覆盖了链表指针，第二次访问同一块时跳垃圾地址崩溃（`-w` 此前从未
+> 上过设备，探针实验首秀暴露）。修复 = stamp 改写到偏移 8、写模式
+> 要求 stride >= 16（源码已入库 bench/src/memrand.c；2026-09-18
+> 设备原地 `gcc -O2 -static` 重建、写模式冒烟 31.8M 次/10s 通过，
+> 新二进制 2604b059 已入库 bench/bin/memrand）。部署后 10 秒冒烟验证：
+>
+> ```bash
+> taskset -c 0 bin/memrand -s 64 -b 64 -d 10 -w   # 应打印统计，不应段错误
+> ```
 
 ## 后处理与出图（本地）
 
