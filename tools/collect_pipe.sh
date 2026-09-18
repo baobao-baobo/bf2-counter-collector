@@ -27,6 +27,9 @@
 # number (in_port=9) depending on OVS build/config (observed both, 9/17 vs
 # 9/18). The poll therefore sends the in_port match server-side and parses
 # only n_packets/n_bytes, so both output forms work.
+# Note: dump-flows output starts with an "NXST_FLOW reply (xid=...)" header
+# line. Never head -1 the raw output; grep the counters out of the whole
+# reply instead (9/18 M8: head -1 grabbed the header, every poll read 0).
 
 BRIDGE=ovsbr1
 PORTS="p1,pf1hpf,en3f1pf1sf0"
@@ -115,9 +118,11 @@ while true; do
             pkts=$(cat "/sys/class/net/$p/statistics/rx_packets" 2>/dev/null)
             bytes=$(cat "/sys/class/net/$p/statistics/rx_bytes" 2>/dev/null)
         else
-            stats=$(ovs-ofctl dump-flows "$BRIDGE" "in_port=$p" 2>/dev/null | head -1)
-            pkts=$(echo "$stats" | grep -o 'n_packets=[0-9]*' | head -1 | cut -d= -f2)
-            bytes=$(echo "$stats" | grep -o 'n_bytes=[0-9]*' | head -1 | cut -d= -f2)
+            # Take the first line that carries counters; the leading
+            # "NXST_FLOW reply" header line has none (see note above).
+            stats=$(ovs-ofctl dump-flows "$BRIDGE" "in_port=$p" 2>/dev/null)
+            pkts=$(echo "$stats" | grep -m1 -o 'n_packets=[0-9]*' | cut -d= -f2)
+            bytes=$(echo "$stats" | grep -m1 -o 'n_bytes=[0-9]*' | cut -d= -f2)
         fi
         line="$line,${pkts:-0},${bytes:-0}"
     done

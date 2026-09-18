@@ -18,7 +18,7 @@
 |---|---|---|---|
 | B1 | fujian：`git pull` + `bash deploy.sh`（路径保持原样 → 设备上是 **tools/collect_pipe.sh**） | 用户 | /root/bf2k/tools/collect_pipe.sh 有 `WIRE_PORTS` 字样 |
 | B2 | BF2：`chmod +x` + `bash -n /root/bf2k/tools/collect_pipe.sh` | 用户 | 无输出 |
-| B3 | **pipe-collection-plan.md §5.5 第 5 步**（第一路）：fujian `iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G` | 用户 | ✅ 机制通过（9/18 M5）：-d 300 大窗流量入窗，规则 in_port=pf1hpf 计 7.817GB = 端口 rx 增量 1:1；NAD 闭环 pf1hpf→SF→Arm + ACK 反向（SF 列 ~10MB）全测出；catch-all 只吃背景；p1 纯背景 ✓。**脚本 bug 坐实**：pipe_m5.csv 列全 0 vs diff 铁证规则计 7.817GB（dump-flows 输出数字端口 vs 脚本按名字 grep）。修复已备（server-side match，bash -n 过），待批准提交 → 部署 + 一轮收尾验证 |
+| B3 | **pipe-collection-plan.md §5.5 第 5 步**（第一路）：fujian `iperf3 -c 192.168.56.103 -p 5202 -t 10 -b 10G` | 用户 | ✅ 机制通过（9/18 M5，diff 铁证 7.817GB=端口 rx 1:1）；脚本 bug 坐实并修复已推（c7ce8ec server-side match）。**M7 判读（9/18）**：窗口 07:42–07:47 UTC 三列全 0，但用户确认 iperf 打流晚于窗口 → **第三次窗外、数据无效**；修复版部署已确认（设备 md5=956f60ce…==本地 c7ce8ec，line 118 服务端 in_port 匹配）。**M8 判读（9/18）**：dump-flows 铁证 **7.03e9/4.643M 包=1514B/包**（打流在窗内、规则端全量成立=M5 复现，dump 缺 iperf 尾 ~0.5s 推断在打流最后一秒取的）；**但 CSV 全 84 行 pf1hpf/en3 恒 0 → 脚本每秒轮询在设备端读空**（本地用用户贴的规则行原文复现管道输出正确，逻辑本身无错）；en3 规则 duration=24.262s 比 pf1hpf 的 15.576s 老 8.7s，疑起过两次采集器（第一次中断，cleanup 的 del-flows 对 en3f1pf1sf0 静默失败留下旧规则）。**病根定案（9/18，设备排查回传）**：设备 `dump-flows` 首行是 `NXST_FLOW reply (xid=0x4):` 头行，脚本 `head -1` 抓到的是头行（无 n_packets）→ 轮询恒 0（M8 CSV 全 0 与 7.03e9 铁证并存的解释）；用户确认中途起过两次采集器（en3 旧规则=第一次中断 cleanup 对 en3f1pf1sf0 静默失败遗留，M9 的 add-flow 同 match 替换自愈）。**已修**：去掉 `head -1`、`grep -m1` 从整段回复取计数（6bba234，本地以设备原文模拟通过 pkts=4643223/bytes=7029786881，新 md5=5c78bc44…），**推送待用户批准** → 待 M9 部署复核 md5 + 按 M8 纪律重跑 |
 | B4 | **pipe-collection-plan.md §5.5 第 6 步**（第二路，同窗）：helong 的 BF2 `iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 5 -b 10G` | 用户 | ✅ 9/18 通过：p1 列 6.31GB/4.157M 包 = 1518B/包 标准线帧，1:1 对 iperf 5.60GiB×1.049 帧开销；ethtool p1 Speed=**100G** 记录在案；1782B 疑点定案=截尾+计数器异步刷新采样失真（判读看全窗汇总） |
 | B5 | Claude 判读 → Task #30、#39 关闭 | Claude | 两列均过 → M2 通过；p1 判死新形态与 Part B 13.1GB 对照记录在案 |
 
@@ -64,4 +64,4 @@
 
 ---
 
-**当前最前序动作**：B3 补跑（56.x 单路，待用户答复 fujian 侧情况）→ B5 判读 → 关 Task #30/#39。
+**当前最前序动作**：B3 补跑（56.x 单路）→ M8 病根定案（`NXST_FLOW reply` 头行被 head -1 吃掉）→ 修复已提交 6bba234 **待推送批准** → **M9**（fujian `git pull`+deploy → BF2 md5 复核 `5c78bc44…` → M8 同纪律重跑：首行即打流+窗口内 dump 铁证）→ B5 判读 → 关 Task #30/#39。
