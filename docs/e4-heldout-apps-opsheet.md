@@ -118,14 +118,56 @@ tar czf /tmp/e4_batch.tar.gz results/e4_*.csv results/e4_*.phase.log
 不计入 PASS；③ 任何不一致先原始计数器逐列取证（如 E2E 对 en3f1_tx 方向的取证），
 再定三类，处置须过双门复验。
 
-## 记录表
+## 记录表（首轮判读，2026-09-22）
 
 | 轮 | CSV | 窗长（实际） | 判决 | L_p 窗口均值 (cr/ih/ib/wb/nad/nhd/tx) | 预期 | 结论 |
 |---|---|---|---|---|---|---|
-| A1 | | | | | cr | |
-| A2 | | | | | cr | |
-| A3 | | | | | cr | |
-| B1 | | | | | cr | |
-| C1 | | | | | cr | |
-| D1 | | | | | nad | |
-| E1 | | | | | 边界 | |
+| A1 | e4_sort_run1.csv | 37s | **dominant cr（0.216）** | 0.216/0.109/0.160/0.006/0/0/0 | cr | **PASS**：ib+ih=外部排序临时文件签名 ✓ |
+| A2 | e4_sort_run2.csv | 41s | **dominant cr（0.227）** | 0.227/0.119/0.125/0.006/0/0/0 | cr | **PASS** |
+| A3 | e4_sort_run3.csv | 39s | **dominant cr（0.232）** | 0.232/0.103/0.142/0.006/0/0/0 | cr | **PASS**（三轮偏差 0.016≤0.025 复现性门 ✓） |
+| B1 | e4_grep_run1.csv | 6s | **dominant cr（0.431）** | 0.431/0.009/0.003/0.015/0/0/0 | cr | **PASS**（窗薄但信号强；ib 0.003 vs A 0.142=只读/读写对比成立 ✓） |
+| C1 | e4_gzip_run1.csv | 58s | **low（cr 0.013）** | 0.013/0.002/0.001/0.001/0/0/0 | cr | **预期设错 → 诚实负例**（取证见下） |
+| D1 | e4_http_run1.csv | 4s | low（cr 0.004） | 0.004/0/0/0/0/0/0 | nad | **执行失败**：窗内 net_rx 峰值 700 B/s=零流量（wget 未取到数据，疑 404/连接拒绝）；引擎报 low 如实；**须重跑** |
+| E1 | e4_armsend_run1.csv | 4s | low（cr 0.002） | 0.002/0/0/0/0/0/0 | 边界 | **执行失败**：窗内 net_tx ~256–444 B/s=零流量（iperf3 未连上服务端）；引擎报 low 如实；**须重跑** |
+
+### C1 取证（诚实负例 #2：gzip 足迹常驻 L2）
+
+- gzip 单线程压 512MB 用时 58s=**8.8MB/s 输入率**（正常单线程量级），但核域计数器几乎无响应：
+  tile_a72_access n=0.001（≈2× 会话背景）、l3 emem_rd≈0（读从未到达 L3）、
+  emem_wr≈100K/s（≈6.4MB/s=压缩输出率，写回经 L3 流出）——全部自洽于
+  **gzip 的 32KB 滑动窗口+哈希表常驻 L2**，逐字节网格流量极小。
+- 族内对照（同引擎口径）：xz 输入仅 3.2MB/s 却 cr 0.584（a72 n=0.096、victim_write n=0.168）
+  ——xz 的 8MB LZMA 字典打穿 L2，逐字节触 DRAM 多次；gzip 输入率高 2.7× 而网格压力低 ~45–96×。
+- 结论：模型按**实测流量**判读而非按应用族标签——"压缩=核重"的族假设被推翻；
+  与 E2E-A openssl 同族（L1/L2 常驻应用属观测盲区，模型不虚构压力）。
+  本场不重跑，负例本身成立且有对照价值；若想补压缩族正例可用大字典应用
+  （zstd --long / pigz ×4，需设备确认安装）。
+
+### D/E 重跑（先对端自检再正式跑）
+
+负载 D（HTTP）：
+```bash
+# fujian：
+ls -la ~/http/rand1g.bin     # 必须 ~1073741824 字节；缺则先：
+# mkdir -p ~/http && dd if=/dev/urandom of=~/http/rand1g.bin bs=1M count=1024
+cd ~/http && python3 -m http.server 8000
+# BF2（先测连通）：
+curl -I http://192.168.56.1:8000/rand1g.bin
+# 期望 "HTTP/1.0 200 OK" + "Content-Length: 1073741824"；若 404/拒绝，
+# 查 fujian 的 56.x 地址（ip a）与服务端输出；连通后正式跑：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_http_run2.csv \
+  -a "wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.1:8000/rand1g.bin" -b 0-3 -t 120
+rm -f /tmp/dl.bin
+```
+负载 E（Arm 主动发送）：
+```bash
+# fujian：
+iperf3 -s -p 5205
+# BF2（先测 3s 连通）：
+iperf3 -c 192.168.56.1 -p 5205 -t 3
+# 期望连接成功+~3s 发送统计；失败查 fujian 地址/端口/服务端输出；连通后正式跑
+#（注意：TCP 下 -b 无效，去掉）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_armsend_run2.csv \
+  -a "iperf3 -c 192.168.56.1 -p 5205 -t 15" -b 0-3 -t 30
+```
+回传：`tar czf /tmp/e4_re.tar.gz results/e4_http_run2.csv results/e4_http_run2.csv.phase.log results/e4_armsend_run2.csv results/e4_armsend_run2.csv.phase.log`
