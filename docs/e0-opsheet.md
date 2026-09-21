@@ -230,3 +230,73 @@ scp root@192.168.100.2:/root/bf2k/e0_3_emmc.csv /tmp/
 - **E0-2**：trio 与 pcie 同涨的编号 = 网口 Arm 面 TRIO；若目标是 rshim 口（192.168.100.2），`net` 软件计数涨而 trio/pcie 不涨 = 管理通道对照组，与 E0-2b 预期一致。
 - **E0-1**：pcie 字节列涨 = 主机向 TRIO 可见（结论 NHD-B）；pcie 不涨 = NHD 对 Arm 侧 TLR 不可见（结论 NHD-A）。两种结论分别对应论文 PCIe 域段落的不同写法，见方案文档 §4。
 - **E0-3**：tile IO_ACCESS 涨且 trio/pcie 平 = eMMC DMA 走 RN-I 不经 PCIe Switch（预期）；若 trio/pcie 意外有信号 → 重新评估 eMMC 挂接位置。
+
+
+---
+
+## 6. F1：E0-1 NHD 重证（2026-09-22，BF2↔BF2 对打，p1 物理口口径）
+
+> 背景：原 E0-1 的 34.5Gbps "NHD" 系打流姿势错误（192.168.101.1 是 fujian 本机地址，
+> Linux local 表本地投递，流量从未出网卡）→ 作废。正确姿势 = 师兄 9/15 答复的拓扑：
+> fujian/helong 两台独立服务器各一张 BF2、p1 互联（§5.6 Part A ping 零丢包已证）。
+> NHD 口径 = 每口列（p1_rx/pf1hpf_rx 物理口 sysfs）+ tc in_hw（硬件计数），
+> 不用 OVS 规则 n_bytes（9/17 已证只计软件段 ~23%）。采集用 e1_esw.conf（81 列，
+> 含每口列 + pcie0/pcie1——pcie 列正是原 E0-1 判读问题"主机向流量对 Arm 侧 TLR 是否
+> 可见"的观测点）。
+
+**6.1 预检（三端，各一个终端）**
+
+```bash
+# 【fujian 主机】服务端（已存在则跳过前两步）
+sudo ip addr add 10.99.99.1/24 dev enp94s0f1np1
+iperf3 -s -B 10.99.99.1 -p 5201 -D
+
+# 【helong 主机 → helong 的 BF2】（helong 上 ssh root@192.168.100.2）
+ip addr add 10.99.99.3/24 dev p1        # 报"已存在"则跳过
+ping -c 2 10.99.99.1                    # 零丢包 = 通路（不通回 §5.6 Part A 兜底）
+ethtool p1 | grep Speed                 # ⭐ 记下来：10.5Gbps 疑点的答案（25G 还是 100G）
+
+# 【fujian 的 BF2】
+ethtool p1 | grep Speed                 # 应 100G（9/18 已确认，复核）
+```
+
+**6.2 采集三轮（每轮 ~50 秒）**
+
+【fujian 的 BF2】开采集：
+
+```bash
+cd /root/bf2k
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e0_1_nhd_run1.csv -t 40 -a "sleep 40"
+```
+
+看到 `APP PHASE START` 后**立刻**切到【helong 的 BF2】执行：
+
+```bash
+/root/iperf3 -c 10.99.99.1 -B 10.99.99.3 -t 10 -b 10G
+```
+
+记录 iperf3 输出吞吐。同一流程重复三轮（`-o ...run2.csv`、`run3.csv`）。
+
+**6.3 事后口径交叉（三轮跑完后，fujian 的 BF2 执行一次）**
+
+```bash
+sudo ovs-ofctl dump-flows ovsbr1 | head -20
+```
+
+把输出存下来（规则 n_bytes = 软件段，in_hw = 硬件计数，两者对比即 9/17 发现的 23% 现象在 NHD 路径上的复现证据）。
+
+**6.4 收尾**：【fujian 主机】`pkill iperf3`（10.99.99.1 的 IP 保留，M2 后续还要用）。
+
+**回传清单**：`e0_1_nhd_run1/2/3.csv` + 三个相位日志 + 三轮 iperf3 吞吐 + dump-flows 输出 + helong p1 的 ethtool Speed。
+
+**验收（Claude 判读）**：p1_rx 增量≈iperf3 体量且 1518B/包签名（wire 帧）；pf1hpf_tx≈p1_rx（主机向投递，2026-09-21 修正：§6 原写 rx 是方向笔误，pf1hpf_rx=ACK 回流 ~2MB/s 也是正常签名）；pcie0_tx 涨 = **NHD-B**（主机向流量对 Arm 侧 TLR 可见）/ 不涨 = NHD-A；pcie1 预期已改：实证 pcie1_rx≈洪流（见下方验收记录，NHD 在 Arm 子系统链路级可见，与 NHD-B 自洽）；en3f1pf1sf0_rx=0 为 Arm 软件零参与判据（net_rx 是 bridge 聚合，会把硬件透传计入，不能用作 Arm 空闲判据——validation-replay.md §8.5）；n_bytes≈23% vs in_hw≈100%。
+
+**F1 验收记录（2026-09-21 晚，三轮全过 G1–G5）**：
+
+| 轮 | p1_rx 体积 | 速率 | pf1hpf_tx/p1_rx | pf1hpf_rx（ACK） | pcie0_tx 预→洪 | pcie1_rx 洪 | en3f1rx | BFS 洪流行投票 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 13.108GB/11s | 9.53Gbps | 1.0000 | 20.8MB | 13KB/s→1.519GB/s | 1.39GB/s | 0 | nhd 11/11 |
+| 2 | 13.058GB/10s | 10.45Gbps | 1.0000 | 20.4MB | 14KB/s→1.517GB/s | 1.39GB/s | 0 | nhd 10/10 |
+| 3 | 8.936GB/7s | 10.21Gbps | 1.0000 | 14.1MB | 0→1.518GB/s | 1.39GB/s | 0 | nhd 7/7 |
+
+判读：① p1_rx 与 pf1hpf_tx 逐轮 1:1（wire 进=主机向投递出），NHD 直通桥签名成立；② pcie0_tx 满载 1.52GB/s → **NHD-B 定案**；③ pcie1_rx 满载 1.39GB/s = **新发现**：NHD 洪流在 Arm 子系统 PCIe 链路级全程可见（Arm 软件零参与 en3f1rx=0，可见性=硬件级中转）；④ enp3s0f1s0_tx=0（走 pf1hpf 而非主机上行 representor，纯 OVS p1↔pf1hpf 桥路径）；⑤ 修复后引擎对三份新数据判读：洪流行 nhd 全票、med L_p nhd=0.306/nad=0.044/tx=0.000，与 e1_n1_10g 同签名同读数（跨数据集一致）；⑥ run2 峰值 10.45Gbps 受 -b 10G 参数封顶，helong 链路速率疑点仍需 ethtool p1 Speed 作答；⑦ G6（n_bytes≈23% vs in_hw≈100%）待用户贴 dump-flows/tc 输出。
