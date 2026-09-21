@@ -21,8 +21,8 @@
 | A 外部归并排序 ×3 | sort -S 4M /tmp/rand512.txt > /dev/null | **CR 主导**（归并计算 + DDR 读写）；IB/IH 中度（-S 4M 强制外部排序，临时文件落 eMMC）；WB 参与（写缓冲） | CR 留出正例 + 复现 |
 | B 文本扫描 | for i in 1 2 3 4 5 6; do grep -c AAAAAAAA /tmp/rand512.txt; done | **CR 主导**（只读流）；WB 明显低于 A——与 A 形成读写对比 | 只读/读写对比 |
 | C 压缩族泛化 | gzip -6 -c /tmp/rand512.txt > /dev/null | **CR 主导**（与库内 xz 同族不同应用）；WB 中度（输出缓冲） | 家族泛化 |
-| D HTTP 下载+落盘 | BF2: wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.1:8000/rand1g.bin（fujian 起 http.server） | **NAD 主导**（Arm 收）+ CR 中度 + eMMC 写入入账；幅度稳健（100Mbps ≪ E2E-B 的 5Gbps，判决应不变） | 新协议 + 幅度稳健 |
-| E Arm 主动发送 | BF2: iperf3 -c 192.168.56.1 -t 15 -b 5G（fujian iperf3 -s） | **边界场景**：arm/eswitch 顶点抬升；模型预期 nad 认领（Arm 边界入口和=出向流量）或如实暴露 Arm→主机出口缺口；tx≈0（p1 未涉） | 出口缺口签名 |
+| D HTTP 下载+落盘 | BF2: wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.11:8000/rand1g.bin（fujian 起 http.server） | **NAD 主导**（Arm 收）+ CR 中度 + eMMC 写入入账；幅度稳健（100Mbps ≪ E2E-B 的 5Gbps，判决应不变） | 新协议 + 幅度稳健 |
+| E Arm 主动发送 | BF2: iperf3 -c 192.168.56.11 -t 15 -b 5G（fujian iperf3 -s） | **边界场景**：arm/eswitch 顶点抬升；模型预期 nad 认领（Arm 边界入口和=出向流量）或如实暴露 Arm→主机出口缺口；tx≈0（p1 未涉） | 出口缺口签名 |
 
 新名词首现：
 - **外部归并排序**：数据量大到内存放不下时，sort 把中间结果写成磁盘临时文件再归并。
@@ -79,7 +79,7 @@ mkdir -p ~/http && dd if=/dev/urandom of=~/http/rand1g.bin bs=1M count=1024
 cd ~/http && python3 -m http.server 8000
 # BF2 终端：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_http_run1.csv \
-  -a "wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.1:8000/rand1g.bin" -b 0-3 -t 120
+  -a "wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.11:8000/rand1g.bin" -b 0-3 -t 120
 # fujian 收尾：Ctrl-C 停 http.server；BF2 收尾：rm /tmp/dl.bin
 ```
 说明：`--limit-rate=100M` 把 1GB 下载拖到 ~80s（56.x 链路 ≫ eMMC 写速，不限速秒完）；
@@ -87,11 +87,11 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_http_run1.csv \
 
 ### 负载 E（1 轮，Arm 主动发送，双端）
 ```bash
-# fujian 终端（fujian 在 56.x 的地址，`ip a` 确认，默认 192.168.56.1）：
+# fujian 终端（fujian 56.x 地址=192.168.56.11，2026-09-22 已由 ip a 确认；早期笔误 56.1 即 D/E 首轮失败的根因）：
 iperf3 -s -p 5205
 # BF2 终端：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_armsend_run1.csv \
-  -a "iperf3 -c 192.168.56.1 -p 5205 -t 15 -b 5G" -b 0-3 -t 30
+  -a "iperf3 -c 192.168.56.11 -p 5205 -t 15 -b 5G" -b 0-3 -t 30
 # fujian 收尾：Ctrl-C
 ```
 
@@ -145,6 +145,11 @@ tar czf /tmp/e4_batch.tar.gz results/e4_*.csv results/e4_*.phase.log
 
 ### D/E 重跑（先对端自检再正式跑）
 
+**首轮失败根因已定（2026-09-22）**：fujian 在 56.x 的地址是 192.168.56.11
+（enp94s0f1np1，ip a 已确认），首轮命令误用 192.168.56.1（不存在）——
+BF2 curl 报 "No route to host"（子网内 ARP 无应答），wget/iperf3 同因即退，
+故两场 4s 零流量。本节目录与上表已全部改为 56.11。
+
 负载 D（HTTP）：
 ```bash
 # fujian：
@@ -152,11 +157,11 @@ ls -la ~/http/rand1g.bin     # 必须 ~1073741824 字节；缺则先：
 # mkdir -p ~/http && dd if=/dev/urandom of=~/http/rand1g.bin bs=1M count=1024
 cd ~/http && python3 -m http.server 8000
 # BF2（先测连通）：
-curl -I http://192.168.56.1:8000/rand1g.bin
+curl -I http://192.168.56.11:8000/rand1g.bin
 # 期望 "HTTP/1.0 200 OK" + "Content-Length: 1073741824"；若 404/拒绝，
 # 查 fujian 的 56.x 地址（ip a）与服务端输出；连通后正式跑：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_http_run2.csv \
-  -a "wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.1:8000/rand1g.bin" -b 0-3 -t 120
+  -a "wget --limit-rate=100M -O /tmp/dl.bin http://192.168.56.11:8000/rand1g.bin" -b 0-3 -t 120
 rm -f /tmp/dl.bin
 ```
 负载 E（Arm 主动发送）：
@@ -164,10 +169,10 @@ rm -f /tmp/dl.bin
 # fujian：
 iperf3 -s -p 5205
 # BF2（先测 3s 连通）：
-iperf3 -c 192.168.56.1 -p 5205 -t 3
+iperf3 -c 192.168.56.11 -p 5205 -t 3
 # 期望连接成功+~3s 发送统计；失败查 fujian 地址/端口/服务端输出；连通后正式跑
 #（注意：TCP 下 -b 无效，去掉）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_armsend_run2.csv \
-  -a "iperf3 -c 192.168.56.1 -p 5205 -t 15" -b 0-3 -t 30
+  -a "iperf3 -c 192.168.56.11 -p 5205 -t 15" -b 0-3 -t 30
 ```
 回传：`tar czf /tmp/e4_re.tar.gz results/e4_http_run2.csv results/e4_http_run2.csv.phase.log results/e4_armsend_run2.csv results/e4_armsend_run2.csv.phase.log`
