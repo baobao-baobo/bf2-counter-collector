@@ -81,14 +81,21 @@ tar czf /tmp/e2e_batch.tar.gz results/e2e_*.csv results/e2e_*.phase.log
 | C | cr dominant + nad 显著 | 双高：med L_p(cr) 高且 med L_p(nad) 明显 >0（共享顶点份额生效）；nhd/tx ≈0 |
 
 判读要点：① 判决必须与独立预期一致（A/B/C 各一行）；② 若 C 的 nad 被压得过低（份额失效）
-或 A/B 判错，即为模型缺陷，须回 validation-replay.md 诊断；③ SAT-SUSPECT 标注按既定机制解读。
+或 A/B 判错，即为模型缺陷，须回 validation-replay.md 诊断；③ SAT-SUSPECT 标注按既定机制解读；
+④ 判决三值（2026-09-22 H3 起）：dominant / low / multi——C 类"有负载但无单一路径过半数票"
+的场景判 **multi**（多路径繁忙、无单一主导），不再误标 low。
 
 ## 记录表
 
-| 轮 | CSV | 窗长（实际） | 判决 | L_p med (cr/ih/ib/wb/nad/nhd/tx) | 预期 | 结论 |
+| 轮 | CSV | 窗长（实际） | 判决 | L_p 窗口均值 (cr/ih/ib/wb/nad/nhd/tx) | 预期 | 结论 |
 |---|---|---|---|---|---|---|
-| A1 | | | | | cr | |
-| A2 | | | | | cr | |
-| A3 | | | | | cr | |
-| B1 | | | | | nad | |
-| C1 | | | | | cr+nad | |
+| A1 | e2e_openssl_run1.csv | 25s | low（cr 0.002） | 0.002/0/0/0/0/0/0 | cr | **预期设错，诚实负例**：AES 是 L1 常驻纯计算，tile 网格访问 11–54K/s（低于会话自身基线），模型如实报无繁忙路径（核内盲区，g6 TFLite 先例）；三轮一致 |
+| A2 | e2e_openssl_run2.csv | 25s | low（cr 0.002） | 同上（三轮合判） | cr | 同 A1 |
+| A3 | e2e_openssl_run3.csv | 25s | low（cr 0.002） | 同上（三轮合判） | cr | 同 A1 |
+| B1 | e2e_udp_nad_run1.csv | 31s（洪流 10s） | **dominant nad（0.541，wins 全票）** | 0.089/0.182/0.062/0.001/**0.541**/0.016/0.000 | nad | **PASS**：方向判据命中；cr 0.089 中度伴随 ✓；nhd 0.016=pcie0 双向链路进向中转的诚实残值、tx 0.000（H3 入口修复后） |
+| C1 | e2e_mixed_run1.csv | 46s（洪流 10s） | **multi（cr 0.584，wins cr 14/35 无多数）** | **0.584**/0.300/0.327/0.011/**0.339**/0.011/0.000 | cr+nad | **双高 PASS**：洪流行内 cr 0.25–1.08 与 nad 0.10–0.97 同时抬升（M1 共享顶点份额脱离实例库成立）；判决按修复后规则为 multi（有负载、无单一路径过半数票）；ib/ih 抬升=xz 的 eMMC 输入读+IO DMA 如实入账 |
+
+**引擎修复（H3，本轮暴露）**：①判决三值化（multi）；②nad 入口方向再修正
+（rx → rx+tx 和，§8.5 的 rx 改动方向读反：2a/B 实测 tx=入向全量 596–949MB/s）；
+③顶点分解与排名统一窗口均值（突发场景中位数被空载行稀释）。双门复验：
+replay 17/17、selfcheck 23/23 全过。详见 validation-replay.md §8.6。

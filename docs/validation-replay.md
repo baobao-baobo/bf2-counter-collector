@@ -297,7 +297,7 @@ N1 姿势（E1 记录中已作废）执行出来的是 helong→p1→eSwitch→h
 |---|---|---|
 | H1 | M1 份额 ε 地板 SHARE_EPS=1000 B/s：入口和≤噪声时诚实均分（保留——修复第 1 处后地板用于真·无方向证据行，如 2b 空相位行均分 0.5/0.33） | tools/analyze_bottleneck.py |
 | H2 | 方向投票地板 VOTE_FLOOR=0.02：argmax L_p 低于地板的行弃权（离线 ε 票实测 ≤0.003，历史最小真实票 0.02） | tools/analyze_bottleneck.py |
-| — | nad 入口 en3f1pf1sf0_tx → **en3f1pf1sf0_rx**（Arm 入向） | configs/path_table.conf |
+| — | nad 入口 en3f1pf1sf0_tx → ~~en3f1pf1sf0_rx~~（方向读反，**§8.6 再修正为 rx+tx 和**：tx 才是入向全量 596–949MB/s，rx 是返回 ~1MB/s） | configs/path_table.conf |
 | — | arm 顶点 net_rx/net_tx@cap → **en3f1pf1sf0_rx/tx@cap**（representor 真实入出向），锚点补 en3f1pf1sf0_rx=825e6（6.6Gbps 平台瓶颈，与 net_rx/tx 同源） | configs/path_table.conf + anchor_sat.conf |
 | — | e1_n1_* 期望 nad→nhd，注释写明姿势作废与实证签名 | tools/replay_validate.py |
 
@@ -317,3 +317,58 @@ Arm 栈真实收发，入口只读入向投递，ε 行诚实弃权。e1_n1 从�
 对 6 张真实票的计数假象”变成“nhd 全票 + nad/tx 零票”的干净判读。
 NHD 口径切物理口 sysfs/tc in_hw 的结论不受影响（那是采集口径，本修复
 是判读引擎）。F1 重证数据回来后可直接用修复后的引擎判读 E0-1 NHD。
+
+## 8.6 E2E 留出负载验证与入口方向再修正（2026-09-22，H3）
+
+### 8.6.1 场景与判决
+
+三个留出负载（docs/e2e-validation-opsheet.md，全部不在实例库中）：
+A openssl AES（预期 CR）、B iperf3 UDP 5G→Arm（预期 NAD 主导）、
+C xz+UDP 并发（预期 CR/NAD 双高）。设备回传 5 轮 CSV + 相位日志，
+本地引擎判读：
+
+| 场景 | 判决（修复后） | 排名要点 | 对照预期 |
+| --- | --- | --- | --- |
+| A | low（cr 0.002） | 全部 ≈0 | 预期 CR → **预期设错**：AES 是 L1 常驻纯计算，tile 网格访问 11–54K/s（三轮一致，低于会话自身基线），模型如实报"无繁忙路径"= 诚实负例（核内盲区，g6 TFLite 同款先例） |
+| B | **dominant nad**（0.541，wins nad 全票） | nad 0.541 / ih 0.182 / cr 0.089 / nhd 0.016 / tx 0.000 | nad 主导 ✓；cr 中度伴随 0.089 ✓（~0.1–0.2 预期带）；nhd/tx ≈0 ✓ |
+| C | **multi**（cr 0.584，wins cr 14/35 无多数） | cr 0.584 / nad 0.339 / ib 0.327 / ih 0.300 / nhd 0.011 / tx 0.000 | 双高 ✓：洪流行内 cr 与 nad 同时抬升（0.25–1.08 / 0.10–0.97），M1 共享顶点份额机制直接验证；单主导判决改 multi |
+
+### 8.6.2 原始判读暴露的两处缺陷（H3 修复）
+
+1. **判决规则缺陷**：C 的 wins 首位无多数（14/35）触发平局条款
+   （e1_g7 先例）被标 "low"，但 med 首位 0.584 是高载——平局条款本是
+   低载场景条款（模型文档原文"整体低负载的场景"）。修复：三值化
+   dominant / low / multi（bfs_search.py，§8.6.3）。
+2. **nad 入口方向再反（§8.5 误修）**：§8.5 把 nad 入口从 tx 改为 rx，
+   依据是"tx 只量 ACK ~100 B/s"——方向读反了。实测量：2a 主机→Arm
+   洪流时 en3f1pf1sf0_tx = **596–949MB/s**（洪流全量），rx =
+   0.6–1.2MB/s（真正的返回流量）；E2E B 纯收 UDP 洪流时 tx =
+   530–844MB/s、rx = 0。representor 约定 tx=交换机→SF 方向。入口
+   用 rx 时（收洪流时 rx≈0）ε 地板让 tx/nhd 分走 arm/eswitch 顶点
+   一半 → B 出现 tx 0.207 / nhd 0.118 的涂抹。修复：入口改
+   **rx+tx 和**（Arm 边界双向总量，方向无关）——收洪流时
+   =0+630M=630M ✓，2b 反向洪流时 =1.31G+ε≈1.31G ✓（2b 不再被
+   误折半），NHD 时 rx=tx=0 落 ε 地板与修复前一致。
+
+### 8.6.3 修复清单与双门复验
+
+- path_table.conf：nad entry → en3f1pf1sf0_rx_bytes+en3f1pf1sf0_tx_bytes
+  （注释改写，含 2a/B 实测方向证据）；
+- bfs_search.py：判决三值化 dominant/low/multi（平局条款只在 med ≥0.2
+  时升级为 multi）；顶点贡献分解与排名统一用窗口均值（突发场景中位数
+  被空载行稀释到 0，E2E B 先例）；自检实例 B 接受 multi；
+- docs/bfs-search-design.md §3/§4 同步三值化与均值口径。
+- **双门复验（修复后实跑）**：replay 17/17 PASS、selfcheck 23/23
+  ALL PASS；B 判决 dominant nad 0.541（tx 0.000、nhd 0.016=仅剩
+  pcie0 双向链路进向中转的诚实残值）；C multi cr 0.584+nad 0.339。
+- 遗留注释：pcie0 是双向链路（56.x 洪流的进向段经主机面 PCIe 进入
+  设备），nhd 路径持 pcie0 顶点，纯 NAD 场景 nhd 仍显示 ~0.02 的
+  进向中转——pcie0 方向盲区的既有缺口（论文 PCIe 段已标注）。
+
+### 8.6.4 对模型意味着什么
+
+留出负载验证 = 泛化能力的直接检验：B（新协议 UDP + 未入库存的洪流
+姿势）方向判据全票命中；C 的共享顶点份额在行内同时抬升两路 L_p，
+M1 机制脱离实例库仍成立；A 证明模型不会对盲区负载虚构压力。三处
+引擎缺陷（判决规则、入口方向、突发窗口聚合口径）全部由留出数据
+暴露并修复——留出验证完成了它的使命。

@@ -9,9 +9,13 @@ is reused verbatim - this file only adds scene aggregation, judgment
 rules, and the evidence-chain report.
 
 Judgment (design doc sec 3; the replay gates formalized):
-  dominant  judge path leads the median ranking
-  low       med leader < 0.2, or the wins leader lacks a majority of
-            rows (e1_g7 cr 36 : nad 35 precedent, 2026-09-20 tie rule)
+  dominant  med leader >= 0.2 and judge path leads the median ranking
+            with a majority of per-row wins
+  low       med leader < 0.2 (whole scene quiet, no busy path)
+  multi     med leader >= 0.2 but the wins leader lacks a majority of
+            rows (busy scene, several paths share dominance; e1_g7
+            cr 36 : nad 35 precedent, 2026-09-20 tie rule; E2E C
+            cr 16/35 with med 0.584, 2026-09-22)
 
 Evidence chain (design doc sec 4):
   verdict + confidence shape, path ranking (median L_p), vertex
@@ -180,7 +184,10 @@ def search(scene, csvs, pipe=None, model=None):
     if nz[top] < 0.2:
         verdict, winner = "low", top
     elif wtop is not None and wtot and wins[wtop] / wtot < 0.5:
-        verdict, winner = "low", top
+        # busy scene without a row-majority winner: multi-path busy,
+        # no single dominant (E2E C: cr med 0.584, wins 16/35 - the
+        # old rule mislabeled it "low"; e1_g7 36:35 tie likewise)
+        verdict, winner = "multi", top
     else:
         verdict, winner = "dominant", top
 
@@ -191,12 +198,15 @@ def search(scene, csvs, pipe=None, model=None):
         vals = vrow.get(key)
         if vals is None:
             continue
-        mv = statistics.median(vals)
+        # window mean, matching the ranking's summarize() - medians
+        # dilute to 0 over idle rows in bursty scenes (E2E B: 10s
+        # flood inside a 30s window; 2026-09-22)
+        mv = statistics.mean(vals)
         label = None
         mn = None
         if vlab.get(key):
             label = max(vlab[key], key=lambda l: len(vlab[key][l]))
-            mn = statistics.median(vlab[key][label])
+            mn = statistics.mean(vlab[key][label])
         ctr = [c for c in vertices[vname]["counters"]
                if "%s@%s" % (c.fam, c.expr) == label.split(":", 1)[1]]
         tier, note = prov_of(ctr[0], prov) if ctr else (1, "unverified")
@@ -235,6 +245,9 @@ def report(sc, paths):
         return
     if sc["verdict"] == "dominant":
         print("  verdict: dominant - %s (med %.3f)" %
+              (sc["winner"], sc["med_top"]))
+    elif sc["verdict"] == "multi":
+        print("  verdict: multi (busy, no single dominant) - med leader %s=%.3f" %
               (sc["winner"], sc["med_top"]))
     else:
         print("  verdict: low (no strong winner) - med leader %s=%.3f" %
@@ -321,7 +334,7 @@ def selfcheck():
         ok = False
         if sc["verdict"] == "dominant":
             ok = sc["winner"] == exp
-        elif sc["verdict"] == "low":
+        elif sc["verdict"] in ("low", "multi"):
             ok = low and sc["winner"] is not None
         status = "PASS" if ok else "FAIL"
         if status == "FAIL":
