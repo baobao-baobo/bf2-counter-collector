@@ -18,7 +18,7 @@
 # Timing: collector runs 70 s (-d 70); bench starts 5 s later and runs
 # 60 s; 5 s of tail room.  Trim first/last 5 rows in post-processing.
 #
-# Expected layout (copy bench/ to the device, e.g. /root/bench/):
+# Expected layout (copy bench/ to the device, e.g. /root/bf2k/bench/):
 #   collect_all   (device-compiled binary)
 #   run_bench.sh
 #   bin/          (arm64 static binaries)
@@ -28,7 +28,7 @@
 BENCH=${1:-p0}
 RUN=${2:-1}
 COLLECT=./collect_all
-IPERF_SERVER=192.168.100.1      # <-- edit to your iperf3 server IP
+IPERF_SERVER=192.168.56.11      # fujian 侧先 iperf3 -s -D（56.x 实验室管道）
 OUT="results/${BENCH}_run${RUN}.csv"
 mkdir -p results
 
@@ -44,15 +44,18 @@ case "$BENCH" in
   p1) CONF=configs/bench_p1_cpu.conf
       CMD="bin/stress-ng --cpu 8 --timeout 60s > results/${BENCH}_run${RUN}_stressng.txt 2>&1" ;;
   p3) CONF=configs/bench_p3_stream.conf
-      CMD="i=0; while [ \$i -lt 15 ]; do bin/stream >> results/${BENCH}_run${RUN}_stream.txt; i=\$((i+1)); done" ;;
+      # each STREAM run is ~1 s (10M elements, 8 threads) - 60 runs
+      # keeps the memory face loaded for the full 60 s bench window
+      CMD="i=0; while [ \$i -lt 60 ]; do bin/stream >> results/${BENCH}_run${RUN}_stream.txt; i=\$((i+1)); done" ;;
   p4) CONF=configs/bench_p4_memrand.conf
       CMD="bin/memrand -s 1024 -b 64 -d 60 > results/${BENCH}_run${RUN}_memrand.txt 2>&1" ;;
   p5) CONF=configs/bench_p5_cache.conf
       CMD="bin/stress-ng --cache 8 --timeout 60s > results/${BENCH}_run${RUN}_stressng.txt 2>&1" ;;
   p6) CONF=configs/bench_p6_fio.conf
-      # /tmp/fio.tmp: tmpfs.  If the device has real NVMe storage, point
-      # --filename at it (e.g. /dev/nvme0n1) to exercise the PCIe/DMA path.
-      CMD="bin/fio --name=t --filename=/tmp/fio.tmp --rw=read --bs=128k --size=4G --numjobs=4 --runtime=60 --time_based --direct=1 > results/${BENCH}_run${RUN}_fio.txt 2>&1" ;;
+      # /root/fio.tmp: on the eMMC root fs (mmcblk0p2, verified 9/18).
+      # Precreate once with dd (bs=1M count=4096) so file creation does
+      # not eat into the 60 s window.  --direct=1 bypasses page cache.
+      CMD="bin/fio --name=t --filename=/root/fio.tmp --rw=read --bs=128k --size=4G --numjobs=4 --runtime=60 --time_based --direct=1 > results/${BENCH}_run${RUN}_fio.txt 2>&1" ;;
   p7) CONF=configs/bench_p7_net.conf
       CMD="bin/iperf3 -c $IPERF_SERVER -t 60 > results/${BENCH}_run${RUN}_iperf.txt 2>&1" ;;
   *) echo "unknown bench: $BENCH (use b1 b2 b3 b4, p1 p3 p4 p5 p6 p7)"; exit 1 ;;

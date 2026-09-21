@@ -18,7 +18,7 @@
 | `apps/src/xz-5.6.4.tar.gz`、`redis-7.2.5.tar.gz` | 应用源码（已入仓库，随 git 流转）                                   |
 | `apps/build_apps_device.sh`                     | 设备侧原生编译脚本（xz + redis-server/benchmark/cli）            |
 | `apps/build_apps.sh`                            | WSL 交叉编译脚本（WSL 恢复后的备选，产物为静态二进制）                       |
-| `apps/tflite_bench.py`                          | G6 推理循环脚本（校准 + 相位跑共用；依赖 tflite-runtime + numpy）          |
+| `apps/tflite_bench.py`                          | G6 推理循环脚本（校准 + 相位跑共用；依赖 tflite-runtime + numpy）       |
 
 ## 1. 部署（GitHub → fujian → BF2）
 
@@ -176,12 +176,15 @@ python tools\split_path.py ^
   编译依赖 g++（实测 9.4.0 已具备；blackscholes 的 pthread 版已预展开，
   不需要 m4）。
 - 校准（相位外试跑，10s 档）：
+  
   ```bash
   time apps/bin/bfs -g 20 -n 3
   ```
+  
   按耗时调整 `-n` 使单次运行 ≈30-35s（落在 -t 40 窗口内；`-g 20` = 2^20 顶点
   kron 图，`-n` = 试跑次数）。
 - 三连跑（`-n` 用校准值）：
+  
   ```bash
   sudo ./run_phase.sh -c configs/app_full.conf -o g2_run1.csv -t 40 -a "apps/bin/bfs -g 20 -n 8"
   ```
@@ -196,11 +199,14 @@ python tools\split_path.py ^
   对 /dev/mmcblk0 裸设备操作；`/tmp` 是 tmpfs（内存盘），DB 绝不能放 /tmp，
   否则测的就不是 eMMC。
 - 校准（`.timer on` 会打每条语句耗时）：
+  
   ```bash
   rm -f <EM>/g4.db* && time apps/bin/sqlite3 <EM>/g4.db < apps/sqlite_workload.sql
   ```
+  
   调 apps/sqlite_workload.sql 里的 1000000 行数使总时长 ≈30-35s。
 - 三连跑（每跑前删旧库，保证冷库）：
+  
   ```bash
   rm -f <EM>/g4.db*
   sudo ./run_phase.sh -c configs/app_full.conf -o g4_run1.csv -t 40 \
@@ -212,12 +218,14 @@ python tools\split_path.py ^
 ## 11. G5 blackscholes（多核对称 CR）三连跑
 
 - 生成输入（一次；数量按校准调）：
+  
   ```bash
   apps/bin/inputgen 5000000 /tmp/bs_in.txt
   ```
 - 校准：`time apps/bin/blackscholes 8 /tmp/bs_in.txt /dev/null`（输出 /dev/null
   消除写盘）→ 单跑 t 秒，则窗口内循环约 35/t 次。
 - 三连跑（循环次数按校准）：
+  
   ```bash
   sudo ./run_phase.sh -c configs/app_full.conf -o g5_run1.csv -t 40 \
       -a "for i in 1 2 3 4 5 6 7 8; do apps/bin/blackscholes 8 /tmp/bs_in.txt /dev/null; done"
