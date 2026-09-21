@@ -23,23 +23,23 @@
 **不新造图**。搜索空间 = `configs/path_table.conf` 既有的 12 顶点、
 7 路径（入口 → 出口方向）：
 
-| 顶点 | 域 | 状态 |
-|---|---|---|
-| hnf / l3 / mss / arm | 核访存域 | ✅ 有锚点 |
-| tilenet / smmu / trio | 互连/IOMMU/内部总线 | ⚠️ 零值悬置（不参与仲裁） |
-| pcie0 | 主机面（Gen3 x16 实测 15.75GB/s） | ✅ cap 锚点 |
-| pcie1 | Arm 子系统（Gen4 x16 31.5GB/s） | ✅ cap 锚点 |
-| eswitch / wire / pf1hpf | 网域 | ✅ cap 锚点（wire=100G 实测） |
+| 顶点                      | 域                          | 状态                     |
+| ----------------------- | -------------------------- | ---------------------- |
+| hnf / l3 / mss / arm    | 核访存域                       | ✅ 有锚点                  |
+| tilenet / smmu / trio   | 互连/IOMMU/内部总线              | ⚠️ 零值悬置（不参与仲裁）         |
+| pcie0                   | 主机面（Gen3 x16 实测 15.75GB/s） | ✅ cap 锚点               |
+| pcie1                   | Arm 子系统（Gen4 x16 31.5GB/s） | ✅ cap 锚点               |
+| eswitch / wire / pf1hpf | 网域                         | ✅ cap 锚点（wire=100G 实测） |
 
-| 路径 | 入口 → 出口 | 判读基准 |
-|---|---|---|
-| cr | 核 → L3 → DDR（core read） | xz/BFS/BS/SQLite/TFLite |
-| ih | 主机 → PCIe → DDR（ingress host） | pcie0 收 |
-| ib | Arm → PCIe → 主机（ingress bridge） | pcie0 反向 |
-| wb | 核 → L3 写回（writeback） | 写应用 |
-| nad | 网口 → Arm 终接（network to Arm DMA） | Redis/iperf 终接 |
-| nhd | 网口 → 主机直通（network to host DMA） | NHD 直通流 |
-| tx | 核 → 网口发送（TX 路径） | p7/上传流 |
+| 路径  | 入口 → 出口                         | 判读基准                    |
+| --- | ------------------------------- | ----------------------- |
+| cr  | 核 → L3 → DDR（core read）         | xz/BFS/BS/SQLite/TFLite |
+| ih  | 主机 → PCIe → DDR（ingress host）   | pcie0 收                 |
+| ib  | Arm → PCIe → 主机（ingress bridge） | pcie0 反向                |
+| wb  | 核 → L3 写回（writeback）            | 写应用                     |
+| nad | 网口 → Arm 终接（network to Arm DMA） | Redis/iperf 终接          |
+| nhd | 网口 → 主机直通（network to host DMA）  | NHD 直通流                 |
+| tx  | 核 → 网口发送（TX 路径）                 | p7/上传流                  |
 
 四类诚实盲点（无硬件计数器，搜索输出必须显式声明而非静默跳过）：
 L3 内部队列压力、PCIe TLR 队列、eSwitch 内部队列、Arm 软件队列。
@@ -98,14 +98,14 @@ L3 内部队列压力、PCIe TLR 队列、eSwitch 内部队列、Arm 软件队�
 **实例集 B（sat 六面，合成已知答案）**：p1–p7 六面本身作为实例输入，
 每个面的资源取向即期望答案：
 
-| 面 | 期望判决 | 判据 |
-|---|---|---|
-| p1 stress-ng cpu | CR 居首（弱面，L_p 量级低） | 幅度判 |
-| p3 STREAM | CR 居首（emem 读+写全压） | 幅度判 |
-| p4 memrand | CR 居首（随机访存） | 幅度判 |
-| p5 cache thrash | CR 居首（最强面） | 幅度判 |
-| p6 fio eMMC | **全路径低位 = 诚实负例**（eMMC 无计数器，覆盖缺口应"看不到"） | 幅度判 |
-| p7 iperf3 | CR 居首（TX DMA 读跳——tile_io_reads n≈1.0，io_reads=TX 速率已实证；出口不可观察，见下注） | 幅度判 |
+| 面                | 期望判决                                                               | 判据  |
+| ---------------- | ------------------------------------------------------------------ | --- |
+| p1 stress-ng cpu | CR 居首（弱面，L_p 量级低）                                                  | 幅度判 |
+| p3 STREAM        | CR 居首（emem 读+写全压）                                                  | 幅度判 |
+| p4 memrand       | CR 居首（随机访存）                                                        | 幅度判 |
+| p5 cache thrash  | CR 居首（最强面）                                                         | 幅度判 |
+| p6 fio eMMC      | **全路径低位 = 诚实负例**（eMMC 无计数器，覆盖缺口应"看不到"）                             | 幅度判 |
+| p7 iperf3        | CR 居首（TX DMA 读跳——tile_io_reads n≈1.0，io_reads=TX 速率已实证；出口不可观察，见下注） | 幅度判 |
 
 > **p7 修正（2026-09-22）**：p7 CSVs（bench_p7_net.conf）无每口列（早于
 > 8ff40c4 特性），TX/NAD/NHD 出口入口列缺失 → 出口路径不可观察；且

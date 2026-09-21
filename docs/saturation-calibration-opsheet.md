@@ -10,13 +10,13 @@ provisional` 的初值，替换为真饱和参考值；同时确认几个 `suspe
 
 锚点表现状（2026-09-17 生成）：
 
-| 类别 | 状态 |
-|---|---|
-| bench-b* 真应力 | b4 已有：A72_ACCESS / HNF_REQUESTS / MEM_READS / MEM_WRITES |
-| e0-dma 真应力 | E0-2/E0-3 已有：io_access 系 |
-| obs-max provisional | 其余全部（含 L3 全系列、pcie0/1、net 等）——只是"见过的最大值"下界 |
-| suspected | p1/pf1hpf/enp3s0f1s0 按 25G 名义值、Arm 收包 6.6 Gbps（已实测平台） |
-| 失效待裁定 | A72_WRITE/RNF_REQUESTS/POC_READS/SMMU_TBU_MISS/TRIO×4/TRIOGEN×2 全系列从未动过（见探针操作单） |
+| 类别                  | 状态                                                                              |
+| ------------------- | ------------------------------------------------------------------------------- |
+| bench-b* 真应力        | b4 已有：A72_ACCESS / HNF_REQUESTS / MEM_READS / MEM_WRITES                        |
+| e0-dma 真应力          | E0-2/E0-3 已有：io_access 系                                                        |
+| obs-max provisional | 其余全部（含 L3 全系列、pcie0/1、net 等）——只是"见过的最大值"下界                                      |
+| suspected           | p1/pf1hpf/enp3s0f1s0 按 25G 名义值、Arm 收包 6.6 Gbps（已实测平台）                           |
+| 失效待裁定               | A72_WRITE/RNF_REQUESTS/POC_READS/SMMU_TBU_MISS/TRIO×4/TRIOGEN×2 全系列从未动过（见探针操作单） |
 
 本次标定的目标：**每类资源至少一个真饱和参考**；其余 obs-max 值能换
 则换。
@@ -141,21 +141,21 @@ MSS_NO_CREDIT 是否会动。本操作单 §2 的四个面已顺带覆盖其中�
 
 ## 6. 判读标准总表
 
-| 标定对象 | 方法 | 期望平台值 | 替换谁 |
-|---|---|---|---|
-| tile_a72_access | p5 cache | ≈195.7M/s（±20%） | 已是 bench-b4 |
-| tile_hnf_requests | p5 / p3 | ≥194M/s | 已是 bench-b4 |
-| tile_mem_reads/writes | p3 STREAM | 与 stream.txt 带宽÷64B 对照 | 已是 bench-b4 |
-| tile_allocate/dir_hit/victim | p4 memrand | 显著高于 7 应用时值 | obs-max |
-| l3 hits/misses/alloc/evict | p4/p5 | 平台值 | obs-max |
-| l3 emem/cdn/ddn/rd/wr 管线 | p3 | 平台值 | obs-max |
-| tile_io_access | p6 eMMC | ≈704k/s（eMMC）/更高（NVMe） | obs-max |
-| tile_io_reads/write/tso_write | p6 | 平台值 | obs-max |
-| net_rx/tx | p7 iperf3 | rx≈6.05Gbps 平台 | 已是 measured/obs-max |
-| pcie0/1 | p7 + lspci 规格 | 与 LnkCap×128/130 对照 | obs-max |
-| wire/eswitch 列 | e1_esw 采集 + iperf3 | 与 ethtool 规格对照 | suspected 25G 确认 |
-| tilenet 三列 | default.conf 采集 | 首次观测 | 缺口闭合 |
-| MSS_NO_CREDIT 等失效列 | 各面对应压力 | 是否动 | [unverified] 裁定 |
+| 标定对象                          | 方法                 | 期望平台值                  | 替换谁                 |
+| ----------------------------- | ------------------ | ---------------------- | ------------------- |
+| tile_a72_access               | p5 cache           | ≈195.7M/s（±20%）        | 已是 bench-b4         |
+| tile_hnf_requests             | p5 / p3            | ≥194M/s                | 已是 bench-b4         |
+| tile_mem_reads/writes         | p3 STREAM          | 与 stream.txt 带宽÷64B 对照 | 已是 bench-b4         |
+| tile_allocate/dir_hit/victim  | p4 memrand         | 显著高于 7 应用时值            | obs-max             |
+| l3 hits/misses/alloc/evict    | p4/p5              | 平台值                    | obs-max             |
+| l3 emem/cdn/ddn/rd/wr 管线      | p3                 | 平台值                    | obs-max             |
+| tile_io_access                | p6 eMMC            | ≈704k/s（eMMC）/更高（NVMe） | obs-max             |
+| tile_io_reads/write/tso_write | p6                 | 平台值                    | obs-max             |
+| net_rx/tx                     | p7 iperf3          | rx≈6.05Gbps 平台         | 已是 measured/obs-max |
+| pcie0/1                       | p7 + lspci 规格      | 与 LnkCap×128/130 对照    | obs-max             |
+| wire/eswitch 列                | e1_esw 采集 + iperf3 | 与 ethtool 规格对照         | suspected 25G 确认    |
+| tilenet 三列                    | default.conf 采集    | 首次观测                   | 缺口闭合                |
+| MSS_NO_CREDIT 等失效列            | 各面对应压力             | 是否动                    | [unverified] 裁定     |
 
 判读原则：**平台段均值三次取中位**；与期望值偏差 >30% 先查采集配置
 再判"计数器语义与预期不符"，不硬改锚点。

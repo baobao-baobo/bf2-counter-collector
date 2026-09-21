@@ -44,3 +44,6 @@ bench/src/
 bench/results/
 bench.tar.gz
 bench-bin.tar.gz
+
+# Local plotting toolchain (portable gnuplot 6.0.2, re-downloadable)
+tools/gnuplot/

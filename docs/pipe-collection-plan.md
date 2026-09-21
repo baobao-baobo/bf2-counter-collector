@@ -304,6 +304,7 @@ ovs-ofctl del-flows ovsbr1 "in_port=pf1hpf"
 8. 回传 `pipe_m2.csv`（fujian 中转 scp）。
 
 判读（Claude）：pf1hpf 列增量 ≈ 8.7GB（OVS 规则口径，Arm 终接流量 100% 成立，对应第 5 步 10s 段）；p1 列 = sysfs 物理口 rx 增量，第 6 步 5s 段 ≈ 5.8GB、第 5 步段应 ≈ 背景（56.x 流量不经 p1）；en3f1pf1sf0 ≈ 背景 → **M2 验收通过** → M3（L4 分类 pipe：加 5201/6379/6380 端口）或直接恢复 E1 并行采集。
+
 - **备选 B（无实验室机器）**：fujian 单机双 netns + macvlan（不动 56.11/eno1 原有配置）：
 
 ```bash

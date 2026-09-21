@@ -57,19 +57,20 @@ cd fio && ./configure && make -j && sudo make install
 
 fio 通过不同的引擎与内核交互，这决定了 I/O 是"同步"还是"异步"：
 
-| 引擎 | 类型 | 说明 |
-|---|---|---|
-| `psync` | 同步 | **默认引擎**。用 pread/pwrite 系统调用，一次只能有一个 I/O 在途 |
-| `sync` | 同步 | 用 read/write（维护文件偏移量），一般不用 |
-| `libaio` | 异步 | Linux 原生异步 I/O（`io_submit`），最常用，**必须配 direct=1 才是真异步**（见下） |
-| `io_uring` | 异步 | 新一代异步接口，提交/完成开销更低，高 IOPS 场景推荐（fio ≥ 3.16） |
-| `mmap` | 内存映射 | 通过 mmap 访问文件，测的是页缓存路径 |
-| `null` | 无 I/O | 不落盘，只测 fio 本身的开销上限（用来判断瓶颈是否在 fio 自身） |
-| `net` | 网络 | 对 socket 做 I/O 负载（fio 也能测网络，但网络测试一般用 iperf3，见另一份文档） |
-| `libpmem` / `dev-dax` | 持久内存 | Intel Optane PMem 测试 |
-| `rdma` | RDMA | RDMA 网络 I/O 负载 |
+| 引擎                    | 类型    | 说明                                                         |
+| --------------------- | ----- | ---------------------------------------------------------- |
+| `psync`               | 同步    | **默认引擎**。用 pread/pwrite 系统调用，一次只能有一个 I/O 在途                |
+| `sync`                | 同步    | 用 read/write（维护文件偏移量），一般不用                                 |
+| `libaio`              | 异步    | Linux 原生异步 I/O（`io_submit`），最常用，**必须配 direct=1 才是真异步**（见下） |
+| `io_uring`            | 异步    | 新一代异步接口，提交/完成开销更低，高 IOPS 场景推荐（fio ≥ 3.16）                  |
+| `mmap`                | 内存映射  | 通过 mmap 访问文件，测的是页缓存路径                                      |
+| `null`                | 无 I/O | 不落盘，只测 fio 本身的开销上限（用来判断瓶颈是否在 fio 自身）                       |
+| `net`                 | 网络    | 对 socket 做 I/O 负载（fio 也能测网络，但网络测试一般用 iperf3，见另一份文档）        |
+| `libpmem` / `dev-dax` | 持久内存  | Intel Optane PMem 测试                                       |
+| `rdma`                | RDMA  | RDMA 网络 I/O 负载                                             |
 
 **关键知识点（面试常考）**：
+
 - **libaio 在 direct=0（走页缓存）时，很多内核实现会退化成同步等待**——所以用 libaio 必须配 `--direct=1`，否则 iodepth 形同虚设。
 - io_uring 相比 libaio 减少了系统调用次数（SQPOLL 模式甚至可完全在内核轮询），在高 IOPS（百万级）场景下 fio 本身的 CPU 开销更低、测得的结果更接近设备真实能力。
 
@@ -130,11 +131,11 @@ fio 通过不同的引擎与内核交互，这决定了 I/O 是"同步"还是"�
 
 fio 统计每条 I/O 的三个时间：
 
-| 名称 | 全称 | 含义 | 谁的性能 |
-|---|---|---|---|
+| 名称       | 全称                 | 含义                 | 谁的性能                         |
+| -------- | ------------------ | ------------------ | ---------------------------- |
 | **slat** | submission latency | fio 决定发起 → 成功提交给内核 | fio 自身 + 系统调用开销（nsec~usec 级） |
-| **clat** | completion latency | 提交给内核 → 完成 | **存储栈 + 设备的真实延迟（核心指标）** |
-| **lat** | total latency | slat + clat | 应用感知的总延迟 |
+| **clat** | completion latency | 提交给内核 → 完成         | **存储栈 + 设备的真实延迟（核心指标）**      |
+| **lat**  | total latency      | slat + clat        | 应用感知的总延迟                     |
 
 面试标准答案：*"slat 是提交延迟，反映测试端开销；clat 是完成延迟，反映内核存储栈和设备的真实性能，是我们要看的核心指标；lat 是两者之和，是应用真正感受到的延迟。"*
 
@@ -144,57 +145,57 @@ fio 统计每条 I/O 的三个时间：
 
 ### 基础参数
 
-| 参数 | 说明 | 默认 |
-|---|---|---|
-| `--name=xxx` | job 名（必填，标识用） | 无 |
-| `--filename=/dev/nvme0n1` | 目标设备（裸设备）或文件路径 | 用 name 生成文件 |
-| `--directory=/mnt/test` | 在指定目录生成测试文件 | 当前目录 |
-| `--size=100G` | 每个文件的大小（K/M/G） | 0（用满设备） |
-| `--runtime=60` | 运行时长（秒） | 由 size 决定 |
-| `--time_based` | 与 runtime 配合：跑满时长而非写完 size | 关 |
-| `--ramp_time=10` | 预热秒数，不计入统计 | 0 |
-| `--rw=read` | I/O 模式：read/write/randread/randwrite/rw/randrw/trim/trimwrite | read |
-| `--bs=4k` | 块大小 | 4k |
-| `--ioengine=libaio` | I/O 引擎（§3.1） | psync |
-| `--iodepth=32` | 队列深度（仅异步引擎） | 1 |
-| `--direct=1` | O_DIRECT，绕过页缓存 | 0 |
-| `--numjobs=4` | 克隆 N 个并行 worker | 1 |
-| `--thread` | worker 用线程而非进程 | 进程 |
-| `--group_reporting` | 多 job 统计合并输出 | 每个 job 单独输出 |
-| `--output=result.txt` | 结果写到文件 | stdout |
-| `--output-format=json` | 输出 JSON（§7.1） | normal |
-| `--eta` | 实时进度 | 关 |
+| 参数                        | 说明                                                            | 默认          |
+| ------------------------- | ------------------------------------------------------------- | ----------- |
+| `--name=xxx`              | job 名（必填，标识用）                                                 | 无           |
+| `--filename=/dev/nvme0n1` | 目标设备（裸设备）或文件路径                                                | 用 name 生成文件 |
+| `--directory=/mnt/test`   | 在指定目录生成测试文件                                                   | 当前目录        |
+| `--size=100G`             | 每个文件的大小（K/M/G）                                                | 0（用满设备）     |
+| `--runtime=60`            | 运行时长（秒）                                                       | 由 size 决定   |
+| `--time_based`            | 与 runtime 配合：跑满时长而非写完 size                                    | 关           |
+| `--ramp_time=10`          | 预热秒数，不计入统计                                                    | 0           |
+| `--rw=read`               | I/O 模式：read/write/randread/randwrite/rw/randrw/trim/trimwrite | read        |
+| `--bs=4k`                 | 块大小                                                           | 4k          |
+| `--ioengine=libaio`       | I/O 引擎（§3.1）                                                  | psync       |
+| `--iodepth=32`            | 队列深度（仅异步引擎）                                                   | 1           |
+| `--direct=1`              | O_DIRECT，绕过页缓存                                                | 0           |
+| `--numjobs=4`             | 克隆 N 个并行 worker                                               | 1           |
+| `--thread`                | worker 用线程而非进程                                                | 进程          |
+| `--group_reporting`       | 多 job 统计合并输出                                                  | 每个 job 单独输出 |
+| `--output=result.txt`     | 结果写到文件                                                        | stdout      |
+| `--output-format=json`    | 输出 JSON（§7.1）                                                 | normal      |
+| `--eta`                   | 实时进度                                                          | 关           |
 
 ### 进阶参数
 
-| 参数 | 说明 |
-|---|---|
-| `--rwmixread=70` | 混合读写中读占比 % |
-| `--percentage_random=70` | 混合模式中随机占比 % |
-| `--random_distribution=zipf:1.2` | 随机分布：zipf（热点）/pareto/normal/gauss |
-| `--norandommap` | 随机 I/O 不保证遍历全 LBA（高 IOPS 场景省开销） |
-| `--randrepeat=0` | 每次运行用不同随机种子（多次测试取平均时用） |
-| `--offset=1G` | 只测设备从 1G 开始的区域（测 HDD 内外圈差异等） |
-| `--fsync=32` | 每 32 次写后发一次 fsync（测持久化代价） |
-| `--end_fsync=1` | 测试结束时 fsync，确保写真正落盘再计时 |
-| `--verify=crc32c` | 写后读回校验数据完整性（crc32c/md5/sha256/sha1/...） |
-| `--do_verify=1` | 只跑校验阶段（配合之前写的数据） |
-| `--verify_fatal=1` | 校验失败立即停止 |
-| `--rate=200m` / `--rate_iops=1000` | 限速（MB/s / IOPS） |
-| `--latency_target=100 --latency_percentile=99` | 以 p99 延迟为目标自适应调整速率 |
-| `--cpus_allowed=0-3` | 绑 CPU 核 |
-| `--numa_cpu_nodes=0 --numa_mem_policy=local` | 绑 NUMA 节点 |
-| `--write_bw_log=pre / --write_lat_log=pre` | 输出逐点带宽/延迟日志（画图用，§7.2） |
-| `--log_avg_msec=1000` | 日志采样周期（ms） |
-| `--loops=3 --stonewall` | 重复 3 轮 / job 间串行隔离 |
-| `--invalidate=1` | 开始前失效页缓存 |
-| `--buffer_compress_percentage=50` | 写数据的可压缩比例（默认 50%，测带压缩的存储时重要） |
-| `--unlink=1` | 测试完删除测试文件 |
-| `--fallocate=none` | 不预分配（写真实数据，测文件系统时更真实） |
-| `--ss=iops:0.1% --ss_dur=300 --ss_interval=10` | SNIA 稳态测试（§7.4） |
-| `--thinktime=500us` | 每条 I/O 之间"思考"500 微秒（模拟真实应用） |
-| `--zonemode=zbd --zonesize=2G` | ZNS SSD 分区测试 |
-| `--allow_mounted_write=1` | 允许写已挂载的设备（新版 fio 默认拒绝，慎用） |
+| 参数                                             | 说明                                      |
+| ---------------------------------------------- | --------------------------------------- |
+| `--rwmixread=70`                               | 混合读写中读占比 %                              |
+| `--percentage_random=70`                       | 混合模式中随机占比 %                             |
+| `--random_distribution=zipf:1.2`               | 随机分布：zipf（热点）/pareto/normal/gauss       |
+| `--norandommap`                                | 随机 I/O 不保证遍历全 LBA（高 IOPS 场景省开销）         |
+| `--randrepeat=0`                               | 每次运行用不同随机种子（多次测试取平均时用）                  |
+| `--offset=1G`                                  | 只测设备从 1G 开始的区域（测 HDD 内外圈差异等）            |
+| `--fsync=32`                                   | 每 32 次写后发一次 fsync（测持久化代价）               |
+| `--end_fsync=1`                                | 测试结束时 fsync，确保写真正落盘再计时                  |
+| `--verify=crc32c`                              | 写后读回校验数据完整性（crc32c/md5/sha256/sha1/...） |
+| `--do_verify=1`                                | 只跑校验阶段（配合之前写的数据）                        |
+| `--verify_fatal=1`                             | 校验失败立即停止                                |
+| `--rate=200m` / `--rate_iops=1000`             | 限速（MB/s / IOPS）                         |
+| `--latency_target=100 --latency_percentile=99` | 以 p99 延迟为目标自适应调整速率                      |
+| `--cpus_allowed=0-3`                           | 绑 CPU 核                                 |
+| `--numa_cpu_nodes=0 --numa_mem_policy=local`   | 绑 NUMA 节点                               |
+| `--write_bw_log=pre / --write_lat_log=pre`     | 输出逐点带宽/延迟日志（画图用，§7.2）                   |
+| `--log_avg_msec=1000`                          | 日志采样周期（ms）                              |
+| `--loops=3 --stonewall`                        | 重复 3 轮 / job 间串行隔离                      |
+| `--invalidate=1`                               | 开始前失效页缓存                                |
+| `--buffer_compress_percentage=50`              | 写数据的可压缩比例（默认 50%，测带压缩的存储时重要）            |
+| `--unlink=1`                                   | 测试完删除测试文件                               |
+| `--fallocate=none`                             | 不预分配（写真实数据，测文件系统时更真实）                   |
+| `--ss=iops:0.1% --ss_dur=300 --ss_interval=10` | SNIA 稳态测试（§7.4）                         |
+| `--thinktime=500us`                            | 每条 I/O 之间"思考"500 微秒（模拟真实应用）             |
+| `--zonemode=zbd --zonesize=2G`                 | ZNS SSD 分区测试                            |
+| `--allow_mounted_write=1`                      | 允许写已挂载的设备（新版 fio 默认拒绝，慎用）               |
 
 ### Job 文件格式
 
@@ -266,21 +267,21 @@ Disk stats (read/write):
 
 逐块解读：
 
-| 输出块 | 含义 | 怎么用 |
-|---|---|---|
-| `Jobs: ... [r=705MiB/s][r=181k IOPS]` | 实时进度行 | 观察测试是否稳定 |
-| `read: IOPS=..., BW=...` | 全程平均 IOPS 与带宽 | **对外报告的核心数字** |
-| `slat (nsec)` | 提交延迟 | 应该远小于 clat；若 slat 异常大，说明 fio 侧/CPU 是瓶颈 |
-| `clat (usec)` | 完成延迟（min/max/avg/stdev） | **核心指标**，与下面 percentile 对照 |
-| `lat (usec)` | 总延迟 = slat + clat | 应用视角 |
-| `clat percentiles` | 延迟分位数 p1~p99.99 | 见下方说明 |
-| `bw` / `iops` 块 | 逐秒采样带宽/IOPS 的 min/max/avg/stdev | stdev 小 = 性能稳定；stdev 大 = 有波动（GC、缓存耗尽） |
-| `lat (usec): 50=..., 250=...` | 完成延迟累计分布直方图 | "99.47% 的 I/O 在 500μs 内完成" |
-| `cpu: usr/sys/ctx` | fio 占用的用户态/内核态 CPU、上下文切换 | **判断 CPU 是否瓶颈**：sys 接近 100%/核 = CPU 先到极限 |
-| `IO depths: 32=100.0%` | 实际达到的深度分布 | **验证 iodepth 真正生效**（全是 1=100% 说明异步没起作用） |
-| `issued rwt` | 总共发出的 read/write/trim 数；short=读到文件尾提前结束的 I/O | 校验总量（IOPS × 时长 ≈ issued） |
-| `Run status group` | 合并汇总（group_reporting） | 报告用 |
-| `Disk stats: util=100.00%` | **设备视角**：util=设备忙的时间占比，in_queue=平均排队请求数 | util=100% 且 IOPS 上不去 → 设备饱和；util 低但 IOPS 低 → 瓶颈在 fio/CPU/内核，不在设备 |
+| 输出块                                   | 含义                                           | 怎么用                                                              |
+| ------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| `Jobs: ... [r=705MiB/s][r=181k IOPS]` | 实时进度行                                        | 观察测试是否稳定                                                         |
+| `read: IOPS=..., BW=...`              | 全程平均 IOPS 与带宽                                | **对外报告的核心数字**                                                    |
+| `slat (nsec)`                         | 提交延迟                                         | 应该远小于 clat；若 slat 异常大，说明 fio 侧/CPU 是瓶颈                           |
+| `clat (usec)`                         | 完成延迟（min/max/avg/stdev）                      | **核心指标**，与下面 percentile 对照                                       |
+| `lat (usec)`                          | 总延迟 = slat + clat                            | 应用视角                                                             |
+| `clat percentiles`                    | 延迟分位数 p1~p99.99                              | 见下方说明                                                            |
+| `bw` / `iops` 块                       | 逐秒采样带宽/IOPS 的 min/max/avg/stdev              | stdev 小 = 性能稳定；stdev 大 = 有波动（GC、缓存耗尽）                            |
+| `lat (usec): 50=..., 250=...`         | 完成延迟累计分布直方图                                  | "99.47% 的 I/O 在 500μs 内完成"                                       |
+| `cpu: usr/sys/ctx`                    | fio 占用的用户态/内核态 CPU、上下文切换                     | **判断 CPU 是否瓶颈**：sys 接近 100%/核 = CPU 先到极限                         |
+| `IO depths: 32=100.0%`                | 实际达到的深度分布                                    | **验证 iodepth 真正生效**（全是 1=100% 说明异步没起作用）                          |
+| `issued rwt`                          | 总共发出的 read/write/trim 数；short=读到文件尾提前结束的 I/O | 校验总量（IOPS × 时长 ≈ issued）                                         |
+| `Run status group`                    | 合并汇总（group_reporting）                        | 报告用                                                              |
+| `Disk stats: util=100.00%`            | **设备视角**：util=设备忙的时间占比，in_queue=平均排队请求数      | util=100% 且 IOPS 上不去 → 设备饱和；util 低但 IOPS 低 → 瓶颈在 fio/CPU/内核，不在设备 |
 
 **percentile（分位数）怎么读**：把所有 I/O 的完成延迟从小到大排序，第 50 百分位 = 一半 I/O 比它快。例：上表中 `99.99th=[1303]` 意为 99.99% 的 I/O 在 1303μs 内完成，即**一万条 I/O 里只有一条超过 1.3ms**。
 

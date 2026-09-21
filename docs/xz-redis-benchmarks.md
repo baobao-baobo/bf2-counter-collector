@@ -6,12 +6,12 @@
 
 ## 1. 两个 bench 在实验中的角色
 
-| | G1 xz | G3 Redis |
-|---|---|---|
-| 对应 PathFinder 应用族 | SPEC CPU（计算密集） | Redis + YCSB（网络服务） |
-| 主要压测路径 | CR（核↔缓存↔内存） | NAD（PCIe 数据交付）+ CR + IH |
-| 端数 | 单端（全部在 BF2 Arm） | 双端（server 在 BF2，client 在 fujian） |
-| 预期主签名 | A72_ACCESS 高、L3 MISSES 显著 | pcie0/pcie1 字节≈网络流量量级且双向、net rx≈tx |
+|                   | G1 xz                     | G3 Redis                           |
+| ----------------- | ------------------------- | ---------------------------------- |
+| 对应 PathFinder 应用族 | SPEC CPU（计算密集）            | Redis + YCSB（网络服务）                 |
+| 主要压测路径            | CR（核↔缓存↔内存）               | NAD（PCIe 数据交付）+ CR + IH            |
+| 端数                | 单端（全部在 BF2 Arm）           | 双端（server 在 BF2，client 在 fujian）   |
+| 预期主签名             | A72_ACCESS 高、L3 MISSES 显著 | pcie0/pcie1 字节≈网络流量量级且双向、net rx≈tx |
 
 xz 是纯计算+访存负载：把 1GB 文件搬进 CPU、压缩、丢弃，不产生网络与磁盘输出，
 用来把网格侧（CR）计数器打满。Redis 是网络服务负载：fujian 持续向 BF2 上的 Redis
@@ -68,13 +68,13 @@ CPU 满转、字典窗口被高频扫读（访存密集）、输出体积≈输�
 
 ### 2.4 参数表
 
-| 参数 | 含义 |
-|---|---|
-| `-c` | 输出到 stdout 而不是 .xz 文件（配合 `> /dev/null` 丢弃，消除输出侧 I/O） |
-| `-9` | 预设级别最高档：64MiB 字典 + bt4 匹配器，每字节 CPU 消耗最大。预设 0~9（0 最快、字典 256KiB；9 最慢、压缩率最高）；另有 `-e`（--extreme）在 9 之上继续加大匹配器强度 |
-| `-T 8` | 8 个压缩线程（按块并行，见 2.3） |
-| `/tmp/g1.dat` | 输入文件（1GB 随机数据） |
-| `> /dev/null` | 丢弃输出，消除输出侧 I/O |
+| 参数            | 含义                                                                                                          |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `-c`          | 输出到 stdout 而不是 .xz 文件（配合 `> /dev/null` 丢弃，消除输出侧 I/O）                                                        |
+| `-9`          | 预设级别最高档：64MiB 字典 + bt4 匹配器，每字节 CPU 消耗最大。预设 0~9（0 最快、字典 256KiB；9 最慢、压缩率最高）；另有 `-e`（--extreme）在 9 之上继续加大匹配器强度 |
+| `-T 8`        | 8 个压缩线程（按块并行，见 2.3）                                                                                         |
+| `/tmp/g1.dat` | 输入文件（1GB 随机数据）                                                                                              |
+| `> /dev/null` | 丢弃输出，消除输出侧 I/O                                                                                              |
 
 验证：xz 退出码 0=成功、1=警告、2=错误，跑完 `echo $?` 应为 0。xz 在 8 核 A72 上
 压 1GB 约需 15~30s，-t 40 的窗口足够；若提前结束，run_phase.sh 会记录实际 app_end，
@@ -141,25 +141,25 @@ GET 类似：请求约 35B，回复约 135B（`$128\r\n<值>\r\n`），服务端
 
 ### 3.4 redis-server 参数表（BF2 上）
 
-| 参数 | 含义 |
-|---|---|
-| `--bind 192.168.56.103` | 只监听 56.103（Arm 侧 SF0 地址）；不绑 0.0.0.0，避免监听无关接口 |
-| `--port 6379` | 监听端口（Redis 默认端口） |
-| `--save ""` | 关闭 RDB 快照（默认周期性 fork+bgsave 写磁盘，会污染计数器：fork 产生巨量 COW 内存流量） |
-| `--appendonly no` | 关闭 AOF 追加日志（同样避免磁盘写入与额外内存拷贝） |
-| `--protected-mode no` | 关闭保护模式（56.x 卡内隔离网络无公网暴露，已确认；否则非回环连接全被拒） |
-| `--daemonize yes` | 后台守护进程运行 |
+| 参数                      | 含义                                                         |
+| ----------------------- | ---------------------------------------------------------- |
+| `--bind 192.168.56.103` | 只监听 56.103（Arm 侧 SF0 地址）；不绑 0.0.0.0，避免监听无关接口               |
+| `--port 6379`           | 监听端口（Redis 默认端口）                                           |
+| `--save ""`             | 关闭 RDB 快照（默认周期性 fork+bgsave 写磁盘，会污染计数器：fork 产生巨量 COW 内存流量） |
+| `--appendonly no`       | 关闭 AOF 追加日志（同样避免磁盘写入与额外内存拷贝）                               |
+| `--protected-mode no`   | 关闭保护模式（56.x 卡内隔离网络无公网暴露，已确认；否则非回环连接全被拒）                    |
+| `--daemonize yes`       | 后台守护进程运行                                                   |
 
 ### 3.5 redis-benchmark 参数表（fujian 上）
 
-| 参数 | 含义 |
-|---|---|
-| `-h 192.168.56.103 -p 6379` | 目标 server 地址/端口 |
-| `-t set,get` | 只跑 SET 与 GET 两类测试（默认会跑十几类：PING/INCR/LPUSH/SADD/MSET…）；两个测试各自独立执行 |
-| `-n 3000000` | 每类测试共 300 万请求（即 300 万 SET + 300 万 GET） |
-| `-c 64` | 64 个并发客户端连接；请求在连接间分发，每条连接串行收发（未开 -P 管道） |
-| `-d 128` | 测试载荷 128 字节（SET 写入的值、GET 读回的值） |
-| `-q` | quiet 模式：每类只打一行吞吐（requests per second）；不加 -q 会额外打印延迟分位（p50/p95/p99）与直方图 |
+| 参数                          | 含义                                                                      |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `-h 192.168.56.103 -p 6379` | 目标 server 地址/端口                                                         |
+| `-t set,get`                | 只跑 SET 与 GET 两类测试（默认会跑十几类：PING/INCR/LPUSH/SADD/MSET…）；两个测试各自独立执行        |
+| `-n 3000000`                | 每类测试共 300 万请求（即 300 万 SET + 300 万 GET）                                  |
+| `-c 64`                     | 64 个并发客户端连接；请求在连接间分发，每条连接串行收发（未开 -P 管道）                                 |
+| `-d 128`                    | 测试载荷 128 字节（SET 写入的值、GET 读回的值）                                          |
+| `-q`                        | quiet 模式：每类只打一行吞吐（requests per second）；不加 -q 会额外打印延迟分位（p50/p95/p99）与直方图 |
 
 输出怎么读：`SET: 123456.78 requests per second` = 每秒完成约 12.3 万次 SET。
 3M 请求在 10 万 rps 量级下约 30s，落在 40s 应用窗口内。键名形如
@@ -177,14 +177,14 @@ GET 类似：请求约 35B，回复约 135B（`$128\r\n<值>\r\n`），服务端
 
 ## 4. 与计数器/图的对应
 
-| 路径 | 代表计数器 | G1 xz | G3 Redis |
-|---|---|---|---|
-| CR 核心访存 | A72_ACCESS, RNF_REQUESTS, HNF_REQUESTS, MEMORY_READS/WRITES | 高（主要活动） | 中 |
-| IH I/O 入口 | IO_ACCESS, IO_READS, IO_WRITE | 低（视 /tmp 介质） | 有（mlx5 MMIO） |
-| WB 写回 | VICTIM_WRITE, EVICTIONS | 有（字典窗口脏行） | 少量 |
-| NAD PCIe 交付 | pcie0/pcie1 TLR 字节 | 近零 | ≈网络流量量级且双向 |
-| net 环回签名 | net rx/tx | 近零 | rx≈tx |
-| L3 | HITS/MISSES/ALLOCATIONS/EVICTIONS | MISSES 显著（大工作集） | 中等 |
+| 路径          | 代表计数器                                                       | G1 xz           | G3 Redis     |
+| ----------- | ----------------------------------------------------------- | --------------- | ------------ |
+| CR 核心访存     | A72_ACCESS, RNF_REQUESTS, HNF_REQUESTS, MEMORY_READS/WRITES | 高（主要活动）         | 中            |
+| IH I/O 入口   | IO_ACCESS, IO_READS, IO_WRITE                               | 低（视 /tmp 介质）    | 有（mlx5 MMIO） |
+| WB 写回       | VICTIM_WRITE, EVICTIONS                                     | 有（字典窗口脏行）       | 少量           |
+| NAD PCIe 交付 | pcie0/pcie1 TLR 字节                                          | 近零              | ≈网络流量量级且双向   |
+| net 环回签名    | net rx/tx                                                   | 近零              | rx≈tx        |
+| L3          | HITS/MISSES/ALLOCATIONS/EVICTIONS                           | MISSES 显著（大工作集） | 中等           |
 
 产出图（tools/split_path.py）：fig1_path_profiles.png（应用×路径）、
 fig2_l3_behavior.png（L3 堆叠）、fig3_conservation.png（守恒校验）。

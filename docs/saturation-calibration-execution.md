@@ -42,6 +42,7 @@ lspci -vv | grep -B2 -A8 "LnkCap"
 ```
 
 ✅ **已执行（9/18，双侧 lspci）**：
+
 - BF2 Arm 侧：五条内部链全 Gen4 x16、LnkSta 全 ok → **pcie1（Arm 子系统）
   [cap] = 16GT/s×16×128/130 ≈ 252 Gbps ≈ 31.5 GB/s**。
 - fujian 宿主侧（复核修正）：VPD 坐实 BlueField-2 100GbE 双口型号；BF2 四函数
@@ -93,14 +94,14 @@ ls -l /root/fio.tmp     # 应 4294967296 字节
 每个面跑 3 次（run 1..3），**每轮 70 秒勿打断**（采集器 -d 70，bench
 在第 5 秒启动跑 60 秒，尾留 5 秒；判读时裁首尾各 5 行）。
 
-| 面 | bench | 打什么 | 采集配置 | 期望平台值（判读用） |
-|---|---|---|---|---|
-| 一 内存 | p3 STREAM | 顺序读写带宽 | bench_p3_stream.conf | MEMORY_READS+WRITES×64B 对照 stream.txt 带宽 |
-| 二 核 | p1 stress-ng cpu | 纯计算（L1 内） | bench_p1_cpu.conf | A72_ACCESS 远低于 p5（b1 仅 2.3M/s，语义如此非故障） |
-| 二 L2 | p5 stress-ng cache | cache 抖动 | bench_p5_cache.conf | A72_ACCESS ≈195.7M/s（±20%）；ALLOCATE/DIR_HIT/L3 系列 |
-| 二 随机 | p4 memrand 1GB | 随机访存 | bench_p4_memrand.conf | L3 miss 率 >90%；ALLOCATE/VICTIM 平台值 |
-| 三 网 | p7 iperf3 | BF2→fujian 打流 | bench_p7_net.conf | net_tx 平台值（net_rx 另由第 5 步复验） |
-| 四 eMMC | p6 fio | 顺序读 I/O | bench_p6_fio.conf | IO_ACCESS ≈704k req/s（E0-3 平台） |
+| 面      | bench              | 打什么           | 采集配置                  | 期望平台值（判读用）                                        |
+| ------ | ------------------ | ------------- | --------------------- | ------------------------------------------------- |
+| 一 内存   | p3 STREAM          | 顺序读写带宽        | bench_p3_stream.conf  | MEMORY_READS+WRITES×64B 对照 stream.txt 带宽          |
+| 二 核    | p1 stress-ng cpu   | 纯计算（L1 内）     | bench_p1_cpu.conf     | A72_ACCESS 远低于 p5（b1 仅 2.3M/s，语义如此非故障）            |
+| 二 L2   | p5 stress-ng cache | cache 抖动      | bench_p5_cache.conf   | A72_ACCESS ≈195.7M/s（±20%）；ALLOCATE/DIR_HIT/L3 系列 |
+| 二 随机   | p4 memrand 1GB     | 随机访存          | bench_p4_memrand.conf | L3 miss 率 >90%；ALLOCATE/VICTIM 平台值                |
+| 三 网    | p7 iperf3          | BF2→fujian 打流 | bench_p7_net.conf     | net_tx 平台值（net_rx 另由第 5 步复验）                      |
+| 四 eMMC | p6 fio             | 顺序读 I/O       | bench_p6_fio.conf     | IO_ACCESS ≈704k req/s（E0-3 平台）                    |
 
 ```bash
 cd /root/bf2k/bench
@@ -250,15 +251,15 @@ tar czf sat_results_0918_1319.tar.gz sat_results_0918_1319/
 
 **回传清单（36+ 文件）**：
 
-| 内容 | 文件 |
-|---|---|
-| 面一 | p3_run{1,2,3}.csv + p3_run{1,2,3}_stream.txt |
-| 面二 | p1/p5/p4 各 run{1,2,3}.csv + 对应 _stressng.txt/_stressng.txt/_memrand.txt |
-| 面三 | p7_run{1,2,3}.csv + p7_run{1,2,3}_iperf.txt |
-| 面四 | p6_run{1,2,3}.csv + p6_run{1,2,3}_fio.txt |
-| rx 复验 | e1_sat_rx.csv |
-| tilenet | tilenet_idle.csv + tilenet_stream.csv + tilenet_stream.txt |
-| 规格 | lspci LnkCap 输出（第 2 步贴文本） |
+| 内容      | 文件                                                                      |
+| ------- | ----------------------------------------------------------------------- |
+| 面一      | p3_run{1,2,3}.csv + p3_run{1,2,3}_stream.txt                            |
+| 面二      | p1/p5/p4 各 run{1,2,3}.csv + 对应 _stressng.txt/_stressng.txt/_memrand.txt |
+| 面三      | p7_run{1,2,3}.csv + p7_run{1,2,3}_iperf.txt                             |
+| 面四      | p6_run{1,2,3}.csv + p6_run{1,2,3}_fio.txt                               |
+| rx 复验   | e1_sat_rx.csv                                                           |
+| tilenet | tilenet_idle.csv + tilenet_stream.csv + tilenet_stream.txt              |
+| 规格      | lspci LnkCap 输出（第 2 步贴文本）                                               |
 
 ---
 
@@ -414,11 +415,77 @@ cd /root/bf2k && tar czf d2_batch.tar.gz bench/results/p4_run*.csv \
 
 ## 常见坑速查
 
-| 坑 | 规避 |
-|---|---|
-| fio 落在 tmpfs（不压 eMMC） | 第 3 步已改 --filename + 预创建 |
-| 4G 文件创建吃进测量窗 | 第 3 步 dd 预创建一次 |
-| p7 服务端没起 | 1a 先 iperf3 -s -D |
-| 70s 窗口被打断 | 每轮等 run_bench.sh 自己结束再跑下一轮 |
-| 打流与采集不同窗 | 第 5/6 步时序：先起采集器→刷行→再打流 |
-| 结果目录混乱 | 每轮结束 `ls -l results/ | tail -3` 自查两个新文件 |
+| 坑                     | 规避                         |
+| --------------------- | -------------------------- |
+| fio 落在 tmpfs（不压 eMMC） | 第 3 步已改 --filename + 预创建   |
+| 4G 文件创建吃进测量窗          | 第 3 步 dd 预创建一次             |
+| p7 服务端没起              | 1a 先 iperf3 -s -D          |
+| 70s 窗口被打断             | 每轮等 run_bench.sh 自己结束再跑下一轮 |
+| 打流与采集不同窗              | 第 5/6 步时序：先起采集器→刷行→再打流     |
+| 结果目录混乱                | 每轮结束 `ls -l results/       |
+
+
+### 9f. 修复重跑块（2026-09-22 首轮回传判读失败后的补救，~25 分钟）
+
+首轮 26 文件已判读（docs/validation-replay.md §8）：**p4×3、p5×3 全部
+因 `bin/memrand`、`bin/stress-ng` 缺执行位（Permission denied）作废**；
+**d2_g6 因命令中 N 占位符未替换、应用 1 秒退出作废**；**d2_g3/d2_g7 的
+fujian 侧 redis-benchmark 未打出流量（net_rx 全零）作废**。g1/g2/g4/g5
+四场景有效（判读见 §8）。以下块照顺序执行后按 9d 重新打包回传（同名
+覆盖即可）。
+
+```bash
+# (1) 恢复 bench 二进制执行位（9/22 deploy 抹掉了 x 位；apps/bin 不受影响）
+chmod +x /root/bf2k/bench/bin/*
+ls -l /root/bf2k/bench/bin/          # 应显示 -rwxr-xr-x 开头
+
+# (2) 清理可能残留的孤儿进程（上次 ^C 中断的 xz 可能仍在跑）
+pgrep -a xz; pgrep -a bfs; pgrep -a python3; pgrep -a memrand
+# 有输出则 pkill -9 -x <名字>，然后重查应为空
+
+# (3) p4/p5 重跑 ×3（每次 ~80 秒，共 ~8 分钟）
+cd /root/bf2k/bench
+sudo ./run_bench.sh p4 1
+sudo ./run_bench.sh p4 2
+sudo ./run_bench.sh p4 3
+sudo ./run_bench.sh p5 1
+sudo ./run_bench.sh p5 2
+sudo ./run_bench.sh p5 3
+# 冒烟判读：txt 不再是 Permission denied——
+head -5 results/p4_run1_memrand.txt     # 应显示 memrand 统计
+tail -3 results/p5_run1_stressng.txt    # 应显示 stress-ng 完成统计
+
+# (4) g6 先校准再跑（N 为校准迭代数，占位符不能用）：
+cd /root/bf2k
+PYTHONPATH=/root/bf2k/apps/pylib python3 apps/tflite_bench.py     apps/mobilenet_v1_1.0_224_quant.tflite 8 100
+# 看输出 per_iter=X ms → N = 35000 / X（目标 app 时长 30-35s），代入下条：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/d2_g6_run1.csv -t 40     -a "PYTHONPATH=/root/bf2k/apps/pylib python3 /root/bf2k/apps/tflite_bench.py         /root/bf2k/apps/mobilenet_v1_1.0_224_quant.tflite 8 N"
+# 验收：相位日志 app_end-app_start 应为 ~30-35s（首轮是 1s）
+
+# (5) g3 重跑 + fujian 侧基准（本机见 APP PHASE START 后立即执行）
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/d2_g3_run1.csv -t 40 -a "sleep 40"
+# fujian: redis-benchmark -h 192.168.56.103 -p 6379 -t set,get -n 3000000 -c 64 -d 128 -q
+# 验收：benchmark 输出有真实 req/s 数字（首轮失败=没跑或连不上）
+
+# (6) g7 重跑 + fujian 侧基准（同 g3；sqlite 窗口 ~31s，基准在窗口内即可）
+rm -f /root/bf2k/g7.db*
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/d2_g7_run1.csv -t 40     -a "apps/bin/sqlite3 /root/bf2k/g7.db < apps/sqlite_workload.sql"
+
+# (7) 重新打包（同名覆盖）
+cd /root/bf2k && tar czf d2_batch.tar.gz bench/results/p4_run*.csv     bench/results/p5_run*.csv bench/results/p4_run*_memrand.txt     bench/results/p5_run*_stressng.txt results/d2_*.csv results/d2_*.csv.phase.log
+```
+
+回传后本地判读：p4/p5 入锚点再生成（provenance=bench-p4/p5 换掉
+SAT-SUSPECT 自引用 om）→ 三关重验（replay 17/17 + selfcheck 23/23，
+selfcheck B 的 p4/p5 面当前因本地旧 CSV 被覆盖而阻塞，回传即恢复）→
+d2_g3/g6/g7 入 BFS 实例表。
+
+
+## §9 收尾（2026-09-22 晚，§9f 修复重跑完成）
+
+§9f 全部执行完毕并验证通过：执行位已修（chmod +x）、孤儿清理（无残留进程，系统
+python3 两条为 blueman/dts_watcher 服务非噪声）、p4/p5 ×3 重跑、g6 标定
+（100 轮 13.674s → 单轮 136.74ms → N=256 → 36s 满窗）、g3/g7 双端 Redis 重跑、
+重打包 d2_batch.tar.gz 回传。本地判读：26 文件全部有效，七场景 med 复现历史，
+三关全绿（详见 docs/validation-replay.md §8.4）。§9 目标达成，本执行单闭环。
+遗留可选项：p4/p5 扩展配置（D4 行）、D3 0x5d/0x72 语义专项。

@@ -12,11 +12,11 @@
 
 **与 PathFinder 的三个本质差异（决定设计走向）**：
 
-| 维度 | PathFinder（Intel SPR/EMR） | BF2 版 |
-|---|---|---|
-| 出口 | 单一（CXL DIMM） | 三类出口 + eSwitch 域（更复杂，但也更接近 DPU 真实工作形态） |
-| W 来源 | 延迟类计数器直接读 + 相邻跳延迟差 | **无延迟类计数器** → W 几乎全靠标定常数 + 实测 RTT（网络出口）；精度靠直接占用证据校准弥补 |
-| 直接占用证据 | 少（靠反推 + 设备打包缓冲） | **多**（MSS_NO_CREDIT / TDMA_RT_AF / TDMA_PBUF_MAC_AF / TX_DAT_AF / RX_DAT_AF / WRQ_BUF_EMPTY）——干扰分析比 Intel 场景证据更硬 |
+| 维度     | PathFinder（Intel SPR/EMR） | BF2 版                                                                                                            |
+| ------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 出口     | 单一（CXL DIMM）              | 三类出口 + eSwitch 域（更复杂，但也更接近 DPU 真实工作形态）                                                                           |
+| W 来源   | 延迟类计数器直接读 + 相邻跳延迟差        | **无延迟类计数器** → W 几乎全靠标定常数 + 实测 RTT（网络出口）；精度靠直接占用证据校准弥补                                                            |
+| 直接占用证据 | 少（靠反推 + 设备打包缓冲）           | **多**（MSS_NO_CREDIT / TDMA_RT_AF / TDMA_PBUF_MAC_AF / TX_DAT_AF / RX_DAT_AF / WRQ_BUF_EMPTY）——干扰分析比 Intel 场景证据更硬 |
 
 **设计目标（2026-09-17 二轮修订后）**：给定一个负载快照（1s 全计数器行），回答一问——**当前哪条数据路径最繁忙**（路径载荷 L_p = Σ 顶点压力指数：每计数器按"空闲→饱和"跨度或 λ/C 归一化到 [0,1]、顶点取压力融合值、沿路径累加，使用路径上**全部**已验证计数器，见 §4.6）。顶点级瓶颈定位与延迟类方法（探针 Q_wait 等）保留至未来工作。
 
@@ -71,18 +71,18 @@ collect_all 单进程 1s 采样天然时间对齐 = 快照机制（对应论文"
 
 ### 逐顶点排队规格（核心表）
 
-| 顶点 | 队列模型 | λ 计数器（已有） | W 来源 | Q^dir 直接证据 | 备注 |
-|---|---|---|---|---|---|
-| A72/L1 | 转发组件（退化定性） | L1D access(0x40)/miss(0x42)、L1I(0x14/0x01) | L1 延迟常数（标定） | 无（核内盲区） | Q 仅作参考，核内走组合信号定性分类（§4） |
-| HNF/L2 | 转发组件 | A72_ACCESS(0x5d)、DIR_HIT(0x61)、ALLOCATE(0x6f≈miss) | W_hit、W_tag 常数（标定） | 无 → Little's Law 反推 | 4 槽：λ 与 Q^dir 同组优先 |
-| tilenet/SkyMesh | **互联段（不套 FCFS）** | CDN_REQ(0x12)/DDN_REQ(0x13)/NDN_REQ(0x14) | — | RX_DAT_AF(0x10)/TX_DAT_AF(0x0f)（SMMU/triogen 视角） | 论文同款排除：互联段只用直接证据，不算 Q |
-| L3 | 转发组件 | HITS_BANK0/1(0x17/0x18)、MISSES_BANK0/1(0x19/0x1a) | W_hit、W_miss=W_tag 常数（标定） | 无 → 反推 | enable 门控采集纪律；miss 请求不滞留 L3 → W_miss 取 tag 常数（论文 L1D/L2 规则） |
-| MSS/DDR | **终止组件** | MEMORY_READS(0x4c)/MEMORY_WRITES(0x4d) | W_ddr 常数（标定，读写分开） | **MSS_NO_CREDIT(0x67)** ★ | Q=λ_hit·W_hit（论文 DIMM 规则）；请求物理滞留 MSS 队列 → 占满即回压 |
-| TRIO/DMA | 转发组件 | TDMA_DATA_BEAT(0xa1，32B/beat) | W_tdma 常数（标定） | **TDMA_RT_AF(0xa8)/TDMA_PBUF_MAC_AF(0xa9)** ★ | 读队列与写缓冲分别有 AF |
-| SMMU | 转发组件 | TBU_MISS(0x0e) | 常数（标定） | TX_DAT_AF(0x0f)/RX_DAT_AF(0x10) ★ | mesh 写/读 FIFO almost full |
-| PCIe TLR | 终止组件 | pcie0/1 TLR byte+packet（机制 2） | W_tlr 常数（标定）+ 实测往返 | TLR 队列状态（若可读） | pcie0=主机面 / pcie1=Arm 子系统 |
-| eSwitch 各口 | 转发组件 | 每口 rx/tx delta（8ff40c4）+ OVS 规则 n_bytes（P1 复活，9/15 三层一致） | 实测 RTT（ping/redis PING p50） | offload 统计 = 直接证据 | 网口域是 BF2 特有扩展；NHD/NAD 图已验证去向语义 |
-| 网口/TX | 终止组件（出口） | collect_net / e1 每口计数 | 实测 RTT | — | 网络出口的 W 是 BF2 唯一有"真延迟"测量的地方 |
+| 顶点              | 队列模型             | λ 计数器（已有）                                                | W 来源                        | Q^dir 直接证据                                       | 备注                                                          |
+| --------------- | ---------------- | -------------------------------------------------------- | --------------------------- | ------------------------------------------------ | ----------------------------------------------------------- |
+| A72/L1          | 转发组件（退化定性）       | L1D access(0x40)/miss(0x42)、L1I(0x14/0x01)               | L1 延迟常数（标定）                 | 无（核内盲区）                                          | Q 仅作参考，核内走组合信号定性分类（§4）                                      |
+| HNF/L2          | 转发组件             | A72_ACCESS(0x5d)、DIR_HIT(0x61)、ALLOCATE(0x6f≈miss)       | W_hit、W_tag 常数（标定）          | 无 → Little's Law 反推                              | 4 槽：λ 与 Q^dir 同组优先                                          |
+| tilenet/SkyMesh | **互联段（不套 FCFS）** | CDN_REQ(0x12)/DDN_REQ(0x13)/NDN_REQ(0x14)                | —                           | RX_DAT_AF(0x10)/TX_DAT_AF(0x0f)（SMMU/triogen 视角） | 论文同款排除：互联段只用直接证据，不算 Q                                       |
+| L3              | 转发组件             | HITS_BANK0/1(0x17/0x18)、MISSES_BANK0/1(0x19/0x1a)        | W_hit、W_miss=W_tag 常数（标定）   | 无 → 反推                                           | enable 门控采集纪律；miss 请求不滞留 L3 → W_miss 取 tag 常数（论文 L1D/L2 规则） |
+| MSS/DDR         | **终止组件**         | MEMORY_READS(0x4c)/MEMORY_WRITES(0x4d)                   | W_ddr 常数（标定，读写分开）           | **MSS_NO_CREDIT(0x67)** ★                        | Q=λ_hit·W_hit（论文 DIMM 规则）；请求物理滞留 MSS 队列 → 占满即回压             |
+| TRIO/DMA        | 转发组件             | TDMA_DATA_BEAT(0xa1，32B/beat)                            | W_tdma 常数（标定）               | **TDMA_RT_AF(0xa8)/TDMA_PBUF_MAC_AF(0xa9)** ★    | 读队列与写缓冲分别有 AF                                               |
+| SMMU            | 转发组件             | TBU_MISS(0x0e)                                           | 常数（标定）                      | TX_DAT_AF(0x0f)/RX_DAT_AF(0x10) ★                | mesh 写/读 FIFO almost full                                   |
+| PCIe TLR        | 终止组件             | pcie0/1 TLR byte+packet（机制 2）                            | W_tlr 常数（标定）+ 实测往返          | TLR 队列状态（若可读）                                    | pcie0=主机面 / pcie1=Arm 子系统                                   |
+| eSwitch 各口      | 转发组件             | 每口 rx/tx delta（8ff40c4）+ OVS 规则 n_bytes（P1 复活，9/15 三层一致） | 实测 RTT（ping/redis PING p50） | offload 统计 = 直接证据                                | 网口域是 BF2 特有扩展；NHD/NAD 图已验证去向语义                              |
+| 网口/TX           | 终止组件（出口）         | collect_net / e1 每口计数                                    | 实测 RTT                      | —                                                | 网络出口的 W 是 BF2 唯一有"真延迟"测量的地方                                 |
 
 ### 事件组设计（4 槽约束下的 λ/Q^dir 同组纪律）
 
@@ -194,17 +194,17 @@ Q 量纲统一为"平均在途请求数"（无量纲）。跨顶点可比的前�
 
 **覆盖性核查结论：背压/瓶颈类计数器不能覆盖所有路径的所有转发点**（约半数覆盖）：
 
-| 顶点 | 背压/忙闲计数器 | 状态 |
-|---|---|---|
-| HNF/L2 | REQ_BUF_EMPTY（忙占比） | ✓ 已实证（7 应用出图） |
-| TRIO | TDMA_RT_AF / TDMA_PBUF_MAC_AF / WRQ_BUF_EMPTY | ✓ 已接入 |
-| SMMU/triogen | TX_DAT_AF / RX_DAT_AF | ✓ 已接入 |
-| eSwitch/网口 | 每口 rx/tx + OVS 规则 + ethtool -S drop | ✓ 已实证（E1/Part B） |
-| MSS/DDR | MSS_NO_CREDIT | ⚠️ 7 应用恒 0、未证实（探针实验 E2-L2 待执行） |
-| tilenet | catalog 48 个生成式 DIAG 事件（是否含 per-channel 满/空型未验证） | ⚠️ 存量资源待探针 |
-| L3 | 无背压型事件（仅频率类） | ✗ 缺口 |
-| PCIe TLR | 机制 2 仅 byte/packet 计数 | ✗ 缺口 |
-| A72 核 | 无占用计数（ARMv8 STALL_BACKEND 0x23 为候选，未接入） | ✗ 定性 |
+| 顶点           | 背压/忙闲计数器                                         | 状态                             |
+| ------------ | ------------------------------------------------ | ------------------------------ |
+| HNF/L2       | REQ_BUF_EMPTY（忙占比）                               | ✓ 已实证（7 应用出图）                  |
+| TRIO         | TDMA_RT_AF / TDMA_PBUF_MAC_AF / WRQ_BUF_EMPTY    | ✓ 已接入                          |
+| SMMU/triogen | TX_DAT_AF / RX_DAT_AF                            | ✓ 已接入                          |
+| eSwitch/网口   | 每口 rx/tx + OVS 规则 + ethtool -S drop              | ✓ 已实证（E1/Part B）               |
+| MSS/DDR      | MSS_NO_CREDIT                                    | ⚠️ 7 应用恒 0、未证实（探针实验 E2-L2 待执行） |
+| tilenet      | catalog 48 个生成式 DIAG 事件（是否含 per-channel 满/空型未验证） | ⚠️ 存量资源待探针                     |
+| L3           | 无背压型事件（仅频率类）                                     | ✗ 缺口                           |
+| PCIe TLR     | 机制 2 仅 byte/packet 计数                            | ✗ 缺口                           |
+| A72 核        | 无占用计数（ARMv8 STALL_BACKEND 0x23 为候选，未接入）          | ✗ 定性                           |
 
 **路径级判定不依赖全覆盖**（每条路径都有已验证的入口观测点），但单入口点 ρ_p=λ_p/C_p 只用一个计数器、违反"全量计数器刻画路径负载"的需求 → **机制已被 §4.6 取代**（本节覆盖性表与未来工作裁定仍有效）：
 
@@ -215,14 +215,14 @@ Q 量纲统一为"平均在途请求数"（无量纲）。跨顶点可比的前�
 输出：ρ_p 排序 → 最繁忙路径；路径上任一 Tier-1 计数器（AF/drop）触发 → 压力标记（可用时）
 ```
 
-| 路径 | 入口计数器（已验证） | 容量参考 C |
-|---|---|---|
-| P1/P2 核→DDR | MEMORY_READS+WRITES（req/s） | DDR 带宽÷64B（membench 饱和，待测） |
-| P3/P4 DMA↔主机 | pcie0 TLR bytes | PCIe 实测带宽（fio 饱和，待测） |
-| P5 NHD | p1_rx_bytes | 端口速率（ethtool，p1 疑 25G） |
-| P6/P7 NAD/中转 | enp3s0f1s0.tx | **6.6 Gbps（Arm 收包瓶颈，实测 6.05）✓ 已有** |
-| P8 TX | 端口 tx_bytes | 端口速率（ethtool） |
-| IB/IH（论文口径） | IO_ACCESS | **eMMC 43 MiB/s（E0-3 实测）✓ 已有** |
+| 路径           | 入口计数器（已验证）                 | 容量参考 C                             |
+| ------------ | -------------------------- | ---------------------------------- |
+| P1/P2 核→DDR  | MEMORY_READS+WRITES（req/s） | DDR 带宽÷64B（membench 饱和，待测）         |
+| P3/P4 DMA↔主机 | pcie0 TLR bytes            | PCIe 实测带宽（fio 饱和，待测）               |
+| P5 NHD       | p1_rx_bytes                | 端口速率（ethtool，p1 疑 25G）             |
+| P6/P7 NAD/中转 | enp3s0f1s0.tx              | **6.6 Gbps（Arm 收包瓶颈，实测 6.05）✓ 已有** |
+| P8 TX        | 端口 tx_bytes                | 端口速率（ethtool）                      |
+| IB/IH（论文口径）  | IO_ACCESS                  | **eMMC 43 MiB/s（E0-3 实测）✓ 已有**     |
 
 - **一套机制**：公式唯一（λ÷C），快照复用 collect_all，路径表 = configs/path_table.conf（PFBuilder 静态化）。同域内（同为 bytes/s 或同为 req/s）可直接按 λ 排序，容量表只在跨域比较时需要。
 - **W 标定从关键路径完全移除**（ρ=λ/C 不含 W）→ §6 移入未来工作。
@@ -235,15 +235,15 @@ Q 量纲统一为"平均在途请求数"（无量纲）。跨顶点可比的前�
 
 **理论借鉴**：
 
-| 借鉴来源 | 借鉴内容 |
-|---|---|
-| PathFinder（SIGCOMM'25） | ΣQ 沿路径可加且跨组件可比，源于 Little 定律把 Q 统一到"在途请求数"（无量纲）。本机制保留"逐顶点量化 + 沿路径累加 + 可比性"结构，把无量纲化手段换成经验归一化（无延迟计数器） |
-| 操作分析（Denning-Buzen 1978 / Lazowska 1984） | 利用率律 ρ=λ·S 与"容量=平均服务时间倒数"使 ρ=λ/C 合法；服务需求律 D=ΣV_i·S_i 使沿路径累加有物理意义（Σρ=λ·D=总资源需求速率） |
-| USE 方法（Gregg） | 每资源三元组 利用率/饱和度/错误 —— 顶点指数 = U（忙占比或 λ/C）+ S（AF/NO_CREDIT 占比）+ E（丢包率）按证据分级融合 |
-| 拥塞控制（DCTCP/DCQCN，交换机缓冲计数） | AF 计数器 = 硬件版 ECN 标记（缓冲阈值穿越计数），"阈值穿越占比"作拥塞信号有网络界先例；丢包率 = drops/arrivals 同款 |
-| MPKI 与 min-max 标度 | 事件数除以公共分母（每千指令 miss）与机器学习 min-max 归一化——"空闲→饱和"跨度归一化到 [0,1] 的惯例来源 |
-| NVIDIA DCGM | 逐引擎利用率百分比向量（SM/内存/IO 各自 0-100%）——"逐组件可比利用率"的工业先例 |
-| Top-Down（Yasin 2014） | stall 槽位归因——未来工作方向（需 STALL_BACKEND 接入） |
+| 借鉴来源                                     | 借鉴内容                                                                                               |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| PathFinder（SIGCOMM'25）                   | ΣQ 沿路径可加且跨组件可比，源于 Little 定律把 Q 统一到"在途请求数"（无量纲）。本机制保留"逐顶点量化 + 沿路径累加 + 可比性"结构，把无量纲化手段换成经验归一化（无延迟计数器） |
+| 操作分析（Denning-Buzen 1978 / Lazowska 1984） | 利用率律 ρ=λ·S 与"容量=平均服务时间倒数"使 ρ=λ/C 合法；服务需求律 D=ΣV_i·S_i 使沿路径累加有物理意义（Σρ=λ·D=总资源需求速率）                   |
+| USE 方法（Gregg）                            | 每资源三元组 利用率/饱和度/错误 —— 顶点指数 = U（忙占比或 λ/C）+ S（AF/NO_CREDIT 占比）+ E（丢包率）按证据分级融合                         |
+| 拥塞控制（DCTCP/DCQCN，交换机缓冲计数）                | AF 计数器 = 硬件版 ECN 标记（缓冲阈值穿越计数），"阈值穿越占比"作拥塞信号有网络界先例；丢包率 = drops/arrivals 同款                          |
+| MPKI 与 min-max 标度                        | 事件数除以公共分母（每千指令 miss）与机器学习 min-max 归一化——"空闲→饱和"跨度归一化到 [0,1] 的惯例来源                                   |
+| NVIDIA DCGM                              | 逐引擎利用率百分比向量（SM/内存/IO 各自 0-100%）——"逐组件可比利用率"的工业先例                                                   |
+| Top-Down（Yasin 2014）                     | stall 槽位归因——未来工作方向（需 STALL_BACKEND 接入）                                                             |
 
 **机制规格（三层索引）**
 
@@ -328,14 +328,14 @@ window-cluster snapshot series → migration events
 
 **目的**：给每个顶点的 W_hit/W_tag/W_serve 常数赋值，并检验"W 不随 λ 变"的常数假设。输出 `calib.json`（含均值、方法、日期）。全部在负载隔离条件下做（单路径独享系统）。
 
-| # | 目标常数 | 实验 | 测法 |
-|---|---|---|---|
-| W1 | L1 hit / L2 hit / W_tag | 指针追逐（membench），工作集 ≤ L1 → ≤ L2 容量 | 每跳平均延迟 → 相减得 W_l1_hit、W_hnf_hit；miss 场景定 W_tag 上界 |
-| W2 | L3 hit / L3 miss(tag) | 工作集介于 L2 与 L3 容量之间 | 减 W_hnf_hit 得 W_l3_hit；大工作集 miss 场景验 W_l3_tag |
-| W3 | DDR 读/写服务时间 | 工作集 >> L3，随机读（依赖链）/顺序写 | 每请求延迟减上游常数 → W_ddr_r / W_ddr_w；扫频检验常数性 |
-| W4 | TDMA/TRIO 服务时间 | fio direct=1、iodepth=1、小块 4KB | 单请求往返减 DDR 部分 → W_tdma |
-| W5 | PCIe TLR 往返 | fio iodepth=1 读主机内存 | W_tlr（pcie0/pcie1 分开） |
-| W6 | 网络出口服务时间 | ping RTT / redis PING p50 / iperf 双向 | **实测延迟**——BF2 唯一"真 W"来源，且随负载可测（W 的负载曲线直接可得） |
+| #   | 目标常数                    | 实验                                   | 测法                                                |
+| --- | ----------------------- | ------------------------------------ | ------------------------------------------------- |
+| W1  | L1 hit / L2 hit / W_tag | 指针追逐（membench），工作集 ≤ L1 → ≤ L2 容量    | 每跳平均延迟 → 相减得 W_l1_hit、W_hnf_hit；miss 场景定 W_tag 上界 |
+| W2  | L3 hit / L3 miss(tag)   | 工作集介于 L2 与 L3 容量之间                   | 减 W_hnf_hit 得 W_l3_hit；大工作集 miss 场景验 W_l3_tag     |
+| W3  | DDR 读/写服务时间             | 工作集 >> L3，随机读（依赖链）/顺序写               | 每请求延迟减上游常数 → W_ddr_r / W_ddr_w；扫频检验常数性            |
+| W4  | TDMA/TRIO 服务时间          | fio direct=1、iodepth=1、小块 4KB        | 单请求往返减 DDR 部分 → W_tdma                            |
+| W5  | PCIe TLR 往返             | fio iodepth=1 读主机内存                  | W_tlr（pcie0/pcie1 分开）                             |
+| W6  | 网络出口服务时间                | ping RTT / redis PING p50 / iperf 双向 | **实测延迟**——BF2 唯一"真 W"来源，且随负载可测（W 的负载曲线直接可得）       |
 
 **常数性检验（关键一步）**：每个 W 在 10%→100% 负载扫描下测曲线；若 W 随 λ 上升 → 该顶点常数假设失效，改为"W = W_cal + 排队项"，其排队项由 Q^dir 校准（回退到 Tier 1 证据）。
 
@@ -343,14 +343,14 @@ window-cluster snapshot series → migration events
 
 ## 7. 验证实验矩阵（论文 Case 3/4/5 的 BF2 版 + 校准）
 
-| 实验 | 场景 | 验证点 | 判据 |
-|---|---|---|---|
-| **C0 校准** | membench 扫频 10%→100% DDR 带宽（单路径） | 证据分级：反推 Q vs Q^dir 一致性 | Q(λW) 与 MSS_NO_CREDIT 曲线同升、无负载≈0 |
-| **C3 干扰** | membench（P1 核路径）+ fio（P4 DMA 路径）共置，DMA 20%→100% | 慢流回压污染快流：HNF/L3 的 Q 与未命中率随 DMA 升 | 核侧组合信号 + Q 单调性（论文 Case 3 同构） |
-| **C4 争用/迁移** | 多路 fio 不同速率 + iperf3 并发（三出口齐全） | MAX_Q 判定正确性 + 瓶颈迁移 + 发射率链条 | culprit 随负载迁移；核侧 λ 降而 Q 反降（Case 4 同构） |
-| **C5 分配** | 多路 fio 饱和 MSS | λ 反推资源分配 | 请求频率 vs 实测带宽 Pearson ≈ 0.998 复现 |
-| **C-E1** | 既有 NHD/NAD 数据回放 | eSwitch 顶点建模正确性 | 2a=6.05Gbps（Arm 收包瓶颈）、N1 字节一致、G 系列 0.1Gbps 与历史同量级——已通过 |
-| **C6 网络** | iperf3/redis 经 eSwitch 三去向（Host/Arm/中转） | 网络出口 W 实测 + eSwitch Q | P5/P6/P7 路径 λ 与 Q 自洽 |
+| 实验           | 场景                                              | 验证点                              | 判据                                                     |
+| ------------ | ----------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
+| **C0 校准**    | membench 扫频 10%→100% DDR 带宽（单路径）                | 证据分级：反推 Q vs Q^dir 一致性           | Q(λW) 与 MSS_NO_CREDIT 曲线同升、无负载≈0                       |
+| **C3 干扰**    | membench（P1 核路径）+ fio（P4 DMA 路径）共置，DMA 20%→100% | 慢流回压污染快流：HNF/L3 的 Q 与未命中率随 DMA 升 | 核侧组合信号 + Q 单调性（论文 Case 3 同构）                           |
+| **C4 争用/迁移** | 多路 fio 不同速率 + iperf3 并发（三出口齐全）                  | MAX_Q 判定正确性 + 瓶颈迁移 + 发射率链条       | culprit 随负载迁移；核侧 λ 降而 Q 反降（Case 4 同构）                  |
+| **C5 分配**    | 多路 fio 饱和 MSS                                   | λ 反推资源分配                         | 请求频率 vs 实测带宽 Pearson ≈ 0.998 复现                        |
+| **C-E1**     | 既有 NHD/NAD 数据回放                                 | eSwitch 顶点建模正确性                  | 2a=6.05Gbps（Arm 收包瓶颈）、N1 字节一致、G 系列 0.1Gbps 与历史同量级——已通过 |
+| **C6 网络**    | iperf3/redis 经 eSwitch 三去向（Host/Arm/中转）         | 网络出口 W 实测 + eSwitch Q            | P5/P6/P7 路径 λ 与 Q 自洽                                   |
 
 ---
 
@@ -368,15 +368,15 @@ window-cluster snapshot series → migration events
 
 ## 9. 开发路线（P0–P4 修订版）
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| **P0 统一采样器** | collect_all 单进程同刻快照（已具备）+ bottleneck.conf 事件组 | 已具备/小改 |
-| **P1 路径表 + λ** | configs/path_table.conf 落地；每路径顶点-计数器映射（含共享顶点 M1 入口比例拆分） | 下一步 |
-| **P1.5 饱和参考标定** | 每主计数器 λ_sat 一次应力标定（membench/fio/iperf3/stress-ng --cache；bench p1–p7 CSV 回填初值） | **P2 前置（W 标定已移除，§4.6）** |
-| **P2 路径繁忙度分析器** | tools/analyze_bottleneck.py：三层索引（计数器→顶点→路径累加，§4.6）+ 判定 + JSON/图输出 | 依赖 P1.5 |
-| **P3 跨快照（可选）** | 分窗聚类 + 繁忙路径迁移检测（接 DL 流水线 30→5 时间步结构） | 复用 PFMaterializer 思路 |
-| **P4 调度接口（可选）** | 快照 JSON 协议 + 资源余量/预警输出 | 论文论证阶段可选 |
-| **未来工作** | 顶点级瓶颈定位：MSS_NO_CREDIT/tilenet DIAG 探针验证、STALL_BACKEND 接入、探针 Q_wait（需 W 标定）、守恒堆积 | §4.5 裁定保留 |
+| 阶段              | 内容                                                                              | 状态                      |
+| --------------- | ------------------------------------------------------------------------------- | ----------------------- |
+| **P0 统一采样器**    | collect_all 单进程同刻快照（已具备）+ bottleneck.conf 事件组                                   | 已具备/小改                  |
+| **P1 路径表 + λ**  | configs/path_table.conf 落地；每路径顶点-计数器映射（含共享顶点 M1 入口比例拆分）                         | 下一步                     |
+| **P1.5 饱和参考标定** | 每主计数器 λ_sat 一次应力标定（membench/fio/iperf3/stress-ng --cache；bench p1–p7 CSV 回填初值）  | **P2 前置（W 标定已移除，§4.6）** |
+| **P2 路径繁忙度分析器** | tools/analyze_bottleneck.py：三层索引（计数器→顶点→路径累加，§4.6）+ 判定 + JSON/图输出               | 依赖 P1.5                 |
+| **P3 跨快照（可选）**  | 分窗聚类 + 繁忙路径迁移检测（接 DL 流水线 30→5 时间步结构）                                            | 复用 PFMaterializer 思路    |
+| **P4 调度接口（可选）** | 快照 JSON 协议 + 资源余量/预警输出                                                          | 论文论证阶段可选                |
+| **未来工作**        | 顶点级瓶颈定位：MSS_NO_CREDIT/tilenet DIAG 探针验证、STALL_BACKEND 接入、探针 Q_wait（需 W 标定）、守恒堆积 | §4.5 裁定保留               |
 
 M2（collect_pipe.sh 部署，Task #30）不阻塞 P1–P2，但 P5/P6/P7 网络路径的 λ 需要它（e1_esw 每口列可先行覆盖 eSwitch 去向）。
 
