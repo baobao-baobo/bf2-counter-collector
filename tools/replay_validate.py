@@ -46,10 +46,21 @@ EXPECT = {
     "e1_n0_2b": ("nad", False, "wins", "host-pipe calibration 2b: reverse"
                                        " (Arm->host via pcie0); judged by"
                                        " the NAD host pipe (pcie0)"),
-    "e1_n1_1g": ("nad", False, "wins", "host->Arm iperf 1G -> NAD"),
-    "e1_n1_5g": ("nad", False, "wins", "host->Arm iperf 5G -> NAD"),
-    "e1_n1_10g": ("nad", False, "wins", "host->Arm iperf 10G -> NAD"),
-    "e1_n1_20g": ("nad", False, "wins", "host->Arm iperf 20G -> NAD"),
+    # e1_n1_* (2026-09-22 retargeted nad->nhd): the executed N1
+    # posture did NOT produce host->Arm traffic.  Counter signature in
+    # every app row: p1_rx ~= pf1hpf_tx = flood, pcie0_tx = flood,
+    # p1_tx = ACKs, en3f1pf1sf0_rx = 0 (Arm never delivered) - pure
+    # wire->host NHD (the N1 posture invalidation already recorded in
+    # the E1 notes).  The engine correctly reads the empirical content;
+    # the gate now encodes that reading.
+    "e1_n1_1g": ("nhd", False, "wins", "executed posture: wire->host"
+                                       " NHD (not host->Arm)"),
+    "e1_n1_5g": ("nhd", False, "wins", "executed posture: wire->host"
+                                       " NHD (not host->Arm)"),
+    "e1_n1_10g": ("nhd", False, "wins", "executed posture: wire->host"
+                                       " NHD (not host->Arm)"),
+    "e1_n1_20g": ("nhd", False, "wins", "executed posture: wire->host"
+                                       " NHD (not host->Arm)"),
     # e0_1_nhd / e0_2_nad are NOT replay targets: the E0 CSVs carry
     # no wire columns (nad/nhd/tx entries absent), and the E0-1
     # evidence itself was invalidated 2026-09-15 (traffic-posture

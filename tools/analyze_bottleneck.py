@@ -39,6 +39,19 @@ NET_THRESH = 1e6
 TIER = {"af": 1, "empty": 1, "span": 2, "cap": 2, "drops": 3, "miss": 4}
 DEFAULT_DENOM = ["l3half0_cycles", "l3half1_cycles"]
 
+# M1 share epsilon floor (H1, 2026-09-22): when the summed entry
+# rates of a shared vertex's owners are at or below background noise
+# (network-domain entries are bytes/s: real flows >= 1MB/s, idle
+# background tens of bytes/s), there is no direction evidence - split
+# equally instead of letting an epsilon entry grab share 1.0 (M1
+# epsilon degeneracy, docs/validation-replay.md sec 8.3).
+SHARE_EPS = 1000.0
+
+# Direction-vote floor (H2, 2026-09-22): a row votes only when its
+# argmax L_p reaches this level.  Measured off-phase epsilon votes
+# are <= 0.003; the smallest real vote on record is 0.02.
+VOTE_FLOOR = 0.02
+
 TOK = re.compile(
     r"^(?P<opt>\?)?(?:(?P<src>[A-Za-z0-9_]+):)?(?P<expr>[A-Za-z0-9_+]*)"
     r"@(?P<fam>[a-z]+)(?::(?P<args>.*))?$")
@@ -345,10 +358,15 @@ class Analyzer:
                     continue
                 # M1 share among paths owning this vertex
                 own = self.owners[vname]
-                denom = sum(entry[q] for q in own if entry[q] is not None)
                 share = 1.0
-                if len(own) > 1 and denom > 0:
-                    share = entry[pname] / denom
+                if len(own) > 1:
+                    denom = sum(entry[q] for q in own if entry[q] is not None)
+                    if denom <= SHARE_EPS:
+                        # no direction evidence (all owner entries at
+                        # background noise): honest equal split (H1)
+                        share = 1.0 / len(own)
+                    else:
+                        share = entry[pname] / denom
                 total += v * share
                 parts.append((vname, v, share, label, excl))
                 # arbitration warning: a stronger-tier counter within
@@ -401,7 +419,8 @@ def run_one(path, pipe_path, paths, vertices, idle_v, span_v, cap_v, unver,
             nz = [p for p, t in lp.items() if t[0] is not None]
             if nz:
                 top = max(nz, key=lambda p: lp[p][0])
-                wins[top] = wins.get(top, 0) + 1
+                if lp[top][0] >= VOTE_FLOOR:
+                    wins[top] = wins.get(top, 0) + 1
             for p, t in lp.items():
                 if t[0] is None:
                     continue
