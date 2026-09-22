@@ -26,6 +26,10 @@ Evidence chain (design doc sec 4):
 
 Usage:
   bfs_search.py <csv...> [--scene NAME] [--json out.json] [--pipe pipe.csv]
+  bfs_search.py <csv...> [--plot PREFIX]
+    writes PREFIX_mag.dat (per-path median L_p) + PREFIX_dir.dat
+    (per-path row wins) + PREFIX.plt (two-panel gnuplot, magnitude
+    and direction in one figure) + PREFIX.png
   bfs_search.py --selfcheck
     instance set A (17 replays): judgments must reproduce
     replay_validate.py's gate conclusions exactly (regression gate)
@@ -131,6 +135,9 @@ def search(scene, csvs, pipe=None, model=None):
     sat_tot = {}
     vrow = {}          # (path, vertex) -> list of v over app rows
     vlab = {}          # (path, vertex) -> dict label -> [n values]
+    contrib = {}       # (path, vertex) -> [v * M1 share] over app rows
+    rowtop = {}        # path -> {vertex: rows where it tops that path}
+    rowlp = {}         # path -> [row L_p] over app rows
     imax = None
     for path in csvs:
         run, out = ab.run_one(path, pipe, paths, vertices, idle_v,
@@ -157,14 +164,33 @@ def search(scene, csvs, pipe=None, model=None):
             for p, t in lp.items():
                 if t[0] is None:
                     continue
+                rowlp.setdefault(p, []).append(t[0])
+                seen = set()
+                topv, topc = None, -1.0
                 for vname, v, share, label, excl in t[1]:
-                    if v is None:
-                        continue
                     key = (p, vname)
+                    if v is None:
+                        # full-support caliber: a vertex unobservable
+                        # on this row contributes 0 to that row's L_p,
+                        # matching the row total exactly
+                        contrib.setdefault(key, []).append(0.0)
+                        seen.add(vname)
+                        continue
+                    seen.add(vname)
                     vrow.setdefault(key, []).append(v)
+                    c = v * share
+                    contrib.setdefault(key, []).append(c)
+                    if c > topc:
+                        topv, topc = vname, c
                     if label:
                         vlab.setdefault(key, {}).setdefault(
                             label, []).append(v)
+                for vname in paths[p]["vertices"]:
+                    if vname not in seen:
+                        contrib.setdefault((p, vname), []).append(0.0)
+                if topv is not None:
+                    rt = rowtop.setdefault(p, {})
+                    rt[topv] = rt.get(topv, 0) + 1
             for vname in vertices:
                 v, m, label, excl = an.vertex_row(run, i, vname)
                 if label and v is not None:
@@ -213,12 +239,36 @@ def search(scene, csvs, pipe=None, model=None):
         excl = vertices[vname]["counters"]
         gated = sum(1 for c in excl
                     if any(x in unver for x in c.components))
-        item = {"vertex": vname, "v": round(mv, 3), "label": label,
+        mc = statistics.mean(contrib[key]) if contrib.get(key) else 0.0
+        item = {"vertex": vname, "v": round(mv, 3), "c": round(mc, 3),
+                "label": label,
                 "n": round(mn, 3) if mn is not None else None,
                 "prov": note, "prov_tier": tier}
         if gated:
             item["unverified_gated"] = gated
         decomp.append(item)
+
+    # P2.5b: contribution attribution - rank the winner path's
+    # vertices by mean contribution (v * M1 share, same window-mean
+    # caliber as the decomposition).  The sum of mean contributions
+    # equals the row-mean L_p; stability = fraction of rows where the
+    # vertex tops the path's own ranking.  This is a model-caliber
+    # decomposition ranking, not causal localization: it inherits the
+    # backpressure coverage gaps and anchor provenance of the model.
+    tot_c = sum(d["c"] for d in decomp) if decomp else 0.0
+    rt = rowtop.get(winner, {})
+    nrows = sum(rt.values())
+    attrib = []
+    for d in decomp:
+        share = round(d["c"] / tot_c, 3) if tot_c > 0 else None
+        st = rt.get(d["vertex"], 0)
+        attrib.append(dict(d, share=share, stable=[st, nrows]))
+    attrib.sort(key=lambda x: -(x["c"] or 0.0))
+    if verdict == "low":
+        # no busy path - attribution is not defined for a quiet scene
+        attrib = []
+    row_mean = (round(statistics.mean(rowlp[winner]), 3)
+                if rowlp.get(winner) else None)
 
     sat_sus = {l: round(sat_sum[l] / sat_tot[l], 3) for l in sat_tot
                if sat_tot[l] >= 10 and sat_sum[l] / sat_tot[l] >= 0.85}
@@ -232,8 +282,11 @@ def search(scene, csvs, pipe=None, model=None):
     return {"scene": scene, "csvs": csvs, "verdict": verdict,
             "winner": winner, "med_top": round(nz[top], 3),
             "wins_top": wtop,
+            "wins": wins, "wtot": wtot,
             "ranking": [(p, round(v, 3)) for p, v in ranking],
-            "decomposition": decomp, "warnings": warnings,
+            "decomposition": decomp,
+            "attrib": attrib, "lp_row_mean": row_mean,
+            "warnings": warnings,
             "idle_max": round(imax, 3) if imax is not None else None}
 
 
@@ -263,6 +316,32 @@ def report(sc, paths):
         if d.get("unverified_gated"):
             line += "  (%d gated unverified)" % d["unverified_gated"]
         print(line)
+    att = sc.get("attrib") or []
+    if sc["verdict"] == "low":
+        print("  bottleneck attribution: skipped (verdict low - no busy path)")
+    else:
+        if sc["verdict"] == "multi":
+            print("  bottleneck attribution (med leader %s; multi scene - "
+                  "direction has no row majority):" % sc["winner"])
+        else:
+            print("  bottleneck attribution (ranked by contribution = "
+                  "vertex value x M1 share):")
+        for i, a in enumerate(att, 1):
+            line = "    #%d %-8s c=%.3f (%.1f%%)  stable %d/%d" % (
+                i, a["vertex"], a["c"],
+                100.0 * (a["share"] or 0.0), a["stable"][0], a["stable"][1])
+            if a["label"]:
+                line += "  <- %s n=%.3f [%s]" % (a["label"], a["n"],
+                                                 a["prov"])
+            if a["label"] in sc["warnings"].get("sat_suspect", {}):
+                line += "  [SAT-SUSPECT anchor]"
+            print(line)
+        if att and sc["lp_row_mean"] is not None:
+            print("    (sum of mean contributions = row-mean L_p = %.3f)"
+                  % sc["lp_row_mean"])
+        print("    note: model-caliber contribution ranking, not causal "
+              "localization (backpressure coverage and anchor provenance "
+              "limits apply)")
     w = sc["warnings"]
     if w["blind"]:
         print("  blind-spot circumstantial evidence:")
@@ -279,6 +358,104 @@ def report(sc, paths):
             print("    " + x)
     if sc["idle_max"] is not None:
         print("  idle max L_p: %.3f" % sc["idle_max"])
+
+
+def make_plot(sc, order, prefix):
+    """Two-panel gnuplot figure (P2.5c): per-path median L_p (magnitude
+    criterion) and per-path row wins (direction criterion) in one
+    image, sharing the x-axis.  House style: full border with no
+    top/right tics, key outside top, winner in deep red #B2172B,
+    wins leader in light orange #F5A682.  Writes PREFIX_mag.dat,
+    PREFIX_dir.dat, PREFIX.plt and renders PREFIX.png via gnuplot."""
+    import subprocess
+    nz = dict(sc["ranking"]) if sc.get("ranking") else {}
+    wins = sc.get("wins") or {}
+    n = len(order)
+    y1 = max(0.35, 1.18 * max([nz.get(p, 0.0) for p in order] + [0.2]))
+    y2 = max(1.0, 1.2 * max([wins.get(p, 0) for p in order] + [1]))
+    winx = (order.index(sc["winner"]) + 1) if sc.get("winner") else 0
+    wtx = (order.index(sc["wins_top"]) + 1) if sc.get("wins_top") else 0
+    wtot = sc.get("wtot") or 0
+    if sc["verdict"] == "dominant":
+        title = "%s -- dominant %s (med %.3f, wins %s=%d/%d)" % (
+            sc["scene"], sc["winner"], sc["med_top"], sc["wins_top"],
+            wins.get(sc["wins_top"], 0), wtot)
+    elif sc["verdict"] == "multi":
+        title = "%s -- multi busy, med leader %s=%.3f" % (
+            sc["scene"], sc["winner"], sc["med_top"])
+    elif sc["verdict"] == "low":
+        title = "%s -- low quiet, med leader %s=%.3f" % (
+            sc["scene"], sc["winner"], sc["med_top"])
+    else:
+        title = "%s -- %s" % (sc["scene"], sc["verdict"])
+    png = prefix + ".png"
+
+    os.makedirs(os.path.dirname(os.path.abspath(prefix)),
+                exist_ok=True)
+    # gnuplot on Windows treats backslashes in quoted strings as
+    # escapes (\b, \r, ...) - hand it forward-slash paths instead.
+    # One data file per panel: this gnuplot 6.0.4 Windows build does
+    # not split blank-line-separated blocks for `index`/`every`
+    # (index 0 reads the whole file, index>=1 reads nothing), so a
+    # two-block file plus `index` would silently empty panel 2.
+    mag = prefix + "_mag.dat"
+    dirf = prefix + "_dir.dat"
+    png_s = png.replace("\\", "/")
+    mag_s = mag.replace("\\", "/")
+    dir_s = dirf.replace("\\", "/")
+    with open(mag, "w") as f:
+        for i, p in enumerate(order, 1):
+            f.write("%d %.4f\n" % (i, nz.get(p, 0.0)))
+    with open(dirf, "w") as f:
+        for i, p in enumerate(order, 1):
+            f.write("%d %d\n" % (i, wins.get(p, 0)))
+
+    tics = ", ".join('"%s" %d' % (p, i)
+                     for i, p in enumerate(order, 1))
+    maj = "%.2f with lines dashtype 2 lc rgb \"#555555\" title \"majority\"" \
+          % (wtot / 2.0)
+    plt = prefix + ".plt"
+    with open(plt, "w") as f:
+        f.write("""\
+set terminal pngcairo size 1280,960 font ",14"
+set output "%s"
+set encoding utf8
+set border 15 lw 1.2
+set xtics nomirror
+set ytics nomirror
+set boxwidth 0.72
+set style fill solid 0.85 border -1
+set multiplot layout 2,1 title "%s" font ",16"
+
+# ---- panel 1: magnitude criterion ----
+set xrange [0.5:%d.5]
+set yrange [0:%.3f]
+set format x ""
+set ylabel "median L_p (window-mean median)" font ",14"
+set title "magnitude criterion" font ",15"
+set key outside top center horizontal
+plot "%s" using 1:2 with boxes lc rgb "#D0D0D0" title "other paths", \\
+     "%s" using 1:($1==%d ? $2 : NaN) with boxes lc rgb "#B2172B" title "winner", \\
+     0.2 with lines dashtype 2 lc rgb "#555555" title "0.2 floor", \\
+     "%s" using 1:($2+0.035*%.3f):($2>0.0005 ? sprintf("%%.2f",$2) : "") with labels font ",11" notitle
+
+# ---- panel 2: direction criterion ----
+set xrange [0.5:%d.5]
+set yrange [0:%.3f]
+set format x
+set xtics (%s) font ",13"
+set ylabel "row wins" font ",14"
+set title "direction criterion (per-row votes)" font ",15"
+set key outside top center horizontal
+plot "%s" using 1:2 with boxes lc rgb "#D0D0D0" title "other paths", \\
+     "%s" using 1:($1==%d ? $2 : NaN) with boxes lc rgb "#F5A682" title "wins leader", \\
+     %s, \\
+     "%s" using 1:($2+0.035*%.3f):($2>0 ? sprintf("%%d",$2) : "") with labels font ",11" notitle
+
+unset multiplot
+""" % (png_s, title, n, y1, mag_s, mag_s, winx, mag_s, y1,
+       n, y2, tics, dir_s, dir_s, wtx, maj, dir_s, y2))
+    subprocess.run(["gnuplot", plt], check=True)
 
 
 def selfcheck():
@@ -341,6 +518,82 @@ def selfcheck():
             fails.append("B:%s" % face)
         print("  %-4s verdict=%-9s winner=%-4s exp=%-4s %s  (%s)" %
               (face, sc["verdict"], sc.get("winner"), exp, status, note))
+    # Instance C: attribution self-consistency + known signatures
+    # (P2.5b).  Gates: sum of mean contributions == row-mean L_p;
+    # descending rank; stability counts bounded; D2 forensics
+    # signature (arm/eswitch near-tie top-2, established 2026-09-22).
+    print("instance C (attribution):")
+    for name, csvs, vexp, top_vertex, near_tie in [
+            ("e4_http_run2", ["results/e4/results/e4_http_run2.csv"],
+             "dominant", {"arm", "eswitch"}, True),
+            ("e2e_openssl", ["results/e2e/e2e_openssl_run1.csv"],
+             "low", set(), False),
+            ("e2e_mixed", ["results/e2e/e2e_mixed_run1.csv"],
+             "multi", set(), False)]:
+        sc = search(name, csvs, model=model)
+        ok, msg = True, []
+        if sc["verdict"] != vexp:
+            ok = False
+            msg.append("verdict %s != %s" % (sc["verdict"], vexp))
+        att = sc.get("attrib") or []
+        if vexp == "low":
+            if att:
+                ok = False
+                msg.append("low scene has attribution")
+        else:
+            s = sum(a["c"] for a in att)
+            lm = sc.get("lp_row_mean")
+            if lm is None or abs(s - lm) > 0.02:
+                ok = False
+                msg.append("contrib sum %.3f != row-mean %s" % (s, lm))
+            cs = [a["c"] for a in att]
+            if any(cs[i] < cs[i + 1] for i in range(len(cs) - 1)):
+                ok = False
+                msg.append("rank not descending")
+            for a in att:
+                st, tot = a["stable"]
+                if st > tot:
+                    ok = False
+                    msg.append("stable %d>%d" % (st, tot))
+            if top_vertex and att and att[0]["vertex"] not in top_vertex:
+                ok = False
+                msg.append("top vertex %s not in %s"
+                           % (att[0]["vertex"], top_vertex))
+            if near_tie and len(att) >= 2 and \
+                    abs(att[0]["c"] - att[1]["c"]) > 0.05:
+                ok = False
+                msg.append("expected near-tie %.3f vs %.3f"
+                           % (att[0]["c"], att[1]["c"]))
+        status = "PASS" if ok else "FAIL"
+        if status == "FAIL":
+            fails.append("C:%s" % name)
+        print("  %-14s verdict=%-9s top=%-8s %s%s" %
+              (name, sc["verdict"], (att[0]["vertex"] if att else "-"),
+               status, ("  " + "; ".join(msg)) if msg else ""))
+
+    # Instance D: gnuplot render smoke test (P2.5c).
+    print("instance D (plot render):")
+    import subprocess
+    prefix = os.path.join(ab.ROOT, "reports", "_selfcheck_render")
+    sc = search("e4_http_run2",
+                ["results/e4/results/e4_http_run2.csv"], model=model)
+    try:
+        make_plot(sc, list(paths.keys()), prefix)
+        ok = os.path.exists(prefix + ".png") and \
+            os.path.getsize(prefix + ".png") > 10000
+    except Exception as e:
+        ok = False
+        print("  render error: %s" % e)
+    for ext in ("_mag.dat", "_dir.dat", ".plt", ".png"):
+        try:
+            os.remove(prefix + ext)
+        except OSError:
+            pass
+    status = "PASS" if ok else "FAIL"
+    if not ok:
+        fails.append("D:render")
+    print("  e4_http_run2 render %s" % status)
+
     print("selfcheck: %s" % ("ALL PASS" if not fails else
                              "FAILURES: " + ",".join(fails)))
     return 0 if not fails else 1
@@ -352,6 +605,7 @@ def main():
     ap.add_argument("--scene", default=None)
     ap.add_argument("--pipe")
     ap.add_argument("--json")
+    ap.add_argument("--plot", help="PREFIX for .dat/.plt/.png figure")
     ap.add_argument("--selfcheck", action="store_true")
     args = ap.parse_args()
 
@@ -364,6 +618,9 @@ def main():
     scene = args.scene or os.path.basename(args.csv[0])
     sc = search(scene, args.csv, args.pipe,
                 (paths, vertices, idle_v, span_v, cap_v, unver))
+    if args.plot:
+        make_plot(sc, list(paths.keys()), args.plot)
+        print("figure written: %s.png" % args.plot)
     report(sc, paths)
     if args.json:
         with open(args.json, "w") as f:
