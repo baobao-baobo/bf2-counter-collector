@@ -226,22 +226,24 @@ ls -la /root/bf2k/data/dbtest                       # 应有 ~2GB 的 .ldb 文�
 cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G prepare
 ```
 
-### 0.4 NPB class 时长标定（BF2，决定每个内核用哪档 class）
+### 0.4 NPB class 时长标定（BF2）——9/23 定案
 
-目标：单轮 20–40s（采样行数充足）。逐条跑 `time`，按实际时长选档（预计量级
-供参考，A72 上可能偏慢）：
+口径：`env OMP_NUM_THREADS=4 taskset -c 0-3`（与批次 1 `-b 0-3` 窗口一致；
+NPB 3.4 无 SER，OMP 四线程替代单线程 SER，信号对齐多线程饱和锚点 p3/p5）。
 
-```bash
-time /root/bf2k/bench/bin/ep.A.x
-time /root/bf2k/bench/bin/is.A.x
-time /root/bf2k/bench/bin/ft.A.x
-time /root/bf2k/bench/bin/mg.S.x
-time /root/bf2k/bench/bin/mg.A.x
-```
+实测（Time in seconds / real）：
 
-选档规则：20–40s 之间 → 该档；<10s → 升档（如 is.A→is.B）；>90s → 降档。
-EP 是纯计算负例，档位只影响时长不影响签名。**把五条 time 输出贴回**，
-确认选档后再进批次 1。
+| 内核 | S | A | B | C |
+|---|---|---|---|---|
+| EP | — | 4.98 / 5.0s | **20.00 / 20.0s** | — |
+| IS | — | 0.46 / 1.0s | — | **9.82 / 19.5s** |
+| FT | — | 2.66 / 3.2s | **38.89 / 41.6s** | — |
+| MG | 0.00 / 0.01s | 2.08 / 3.1s | **9.72 / 10.7s（循环×2）** | — |
+| CG | — | **2.34 / 2.7s（循环×10）** | — | — |
+
+定档：EP=B 单发；IS=C 单发（real 19.5s 含 ~10s 初始化分配，窗口按 real 计）；
+FT=B 单发；MG=B 循环×2；CG=A 循环×10。全部 Verification SUCCESSFUL。
+is.C 需补编：`make is CLASS=C`（S/A/B 已编，C 未编）。
 
 ### 0.5 对端就绪（fujian / helong）
 
