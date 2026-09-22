@@ -207,3 +207,58 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_armsend_run2.csv \
   -a "iperf3 -c 192.168.56.11 -p 5205 -t 15" -b 0-3 -t 30
 ```
 回传：`tar czf /tmp/e4_re.tar.gz results/e4_http_run2.csv results/e4_http_run2.csv.phase.log results/e4_armsend_run2.csv results/e4_armsend_run2.csv.phase.log`
+
+## E4 扩展：打穿访存链路（2026-09-22 新增，期望先行）
+
+**背景**：C1 定案 gzip 足迹常驻 L2（诚实负例 #2），库内 xz（8MB 字典）cr 0.584。
+用户要求再补一轮压缩实验，但这次要"打穿访存链路"而非"压完即丢"。
+两个词的计数器语言定义：
+- **打穿访存链路**：负载工作集大于 L2（1MB），核请求与逐出流量贯穿网格全链
+  （tile_a72_access → hnf → L3 → victim_write 全线抬升），全程持续；
+- **压完即丢**：单遍流式（C1 gzip：输入 8.8MB/s + 输出 6.4MB/s），窗口/哈希表
+  常驻 L2，逐字节网格流量 ≈ 0，DRAM 只吃流式速率。
+两个架构常数决定一切：**DEFLATE 窗口上限 32KB**（RFC 1951，gzip 无参数可调大）；
+**LZMA2 字典 -6=8MB、-9=64MB**（xz 可调）。1MB L2 是分水岭——
+gzip 任何配置都打不穿（多线程只把流式速率乘 N，归一化仍 <0.01），
+xz -9 必然打穿。故 F1/F2 选 xz 为主力，G 为 gzip 同形对照。
+
+### 负载 F1（xz -9 压缩，打穿主力）
+```bash
+cat /tmp/rand512.txt > /dev/null   # page cache 预热（剔除 eMMC 读混杂）
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_xz9_run1.csv \
+  -a "xz -9 -T4 -k /tmp/rand512.txt" -b 0-3 -t 600
+```
+说明：-9=64MB 字典 ×4 线程 ≈ 256MB 工作集 ≫ 1MB L2 → 匹配搜索逐字节触 DRAM、
+字典行持续逐出（victim_write）。512MB 随机数据预计 60–300s（LZMA -9 每线程
+0.5–2MB/s）。回退：OOM（~2.7GB 内存）→ -T2；旧版 xz 无 -T → 去 -T4；
+>600s 未跑完 → 改 -6。
+
+### 负载 F2（xz -t 回读校验，打穿第二段）
+```bash
+cat /tmp/rand512.txt.xz > /dev/null
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_xzt_run1.csv \
+  -a "xz -t -T4 /tmp/rand512.txt.xz" -b 0-3 -t 600
+```
+说明：xz -t 全量解压校验但不写输出（压→写→回读→验全链路收尾），无输出写 →
+wb ≈ 0，与 F1 的 wb 构成读写分离对照。预计 30–90s（解码快于压缩）。
+
+### 负载 G（gzip 同形对照，期望 low——可选）
+```bash
+cat /tmp/rand512.txt > /dev/null
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/e4_gzip9_run1.csv \
+  -a "gzip -9 -c /tmp/rand512.txt | sha256sum" -b 0-3 -t 120
+```
+说明：输出被 sha256sum 消费（非压完即丢），但 32KB 窗口仍常驻 L2——
+**期望 low（cr ≈ 0.01–0.02，与 C1 一致），这个 low 就是正确结果**
+（DEFLATE 窗口是架构硬上限，gzip 打不穿与调参无关）。价值：与 F1 同输入、
+同消费形态的族内对照，坐实"逐字节网格流量是应用属性而非族标签"。
+
+### 判读标准补充
+
+| 负载 | 期望判决 | 期望签名 | 不一致时的处置 |
+|---|---|---|---|
+| F1 | dominant cr | cr ≥ 0.584（库内 xz 基线；4 线程聚合下 a72_access 顶点可能顶到锚点上界钳位 1.0，SAT-SUSPECT 允许且如实）；a72/hnf/victim_write 同抬升（64MB 字典逐出）；emem_rd 可见（≈输入率量级）；wb 中度 | 按 docs/validation-replay.md §8.6 三类（引擎缺陷/覆盖缺口/预期设错）诊断 |
+| F2 | dominant cr | cr 中高（a72/hnf 驱动）；emem_rd 可见（=解码输出率量级）；wb ≈ 0（与 F1 对比） | 同上 |
+| G | low（诚实负例） | cr ≈ 0.01–0.02（与 C1 同族同量级） | 若报 high 反而要逐列取证 |
+
+回传：`tar czf /tmp/e4_xz_batch.tar.gz results/e4_xz9_run1.csv results/e4_xz9_run1.csv.phase.log results/e4_xzt_run1.csv results/e4_xzt_run1.csv.phase.log results/e4_gzip9_run1.csv results/e4_gzip9_run1.csv.phase.log`
