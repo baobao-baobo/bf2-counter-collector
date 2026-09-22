@@ -176,13 +176,19 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   for k in ep is mg cg ft; do for c in S A B; do make $k CLASS=$c; done; done
   cp bin/*.x /root/bf2k/bench/bin/     # ep.S.x ep.A.x ... ft.B.x
   ```
-- **0.2.7 GUPS（自写 ~60 行 C，设备上直接写入，不走 git）**
+- **0.2.7 GUPS（自写 ~60 行 C，设备上直接写入，不走 git）——v2 计时修复版**
+  踩坑定案（9/23）：v1 用 `clock()`（进程 CPU 时间）——aarch64 vDSO 只提供墙钟
+  类时钟（REALTIME/MONOTONIC 等），进程 CPU 时间必须走系统调用，每次迭代查一次
+  ≈700–900ns，计时开销主导速率（lg=15/18/20 全 ~0.001 GUP/s 阶梯消失）。v2 改
+  `CLOCK_MONOTONIC`（vDSO ~20ns）+ 每 1024 次更新查一次时间：
   ```bash
   mkdir -p /root/bf2k/bench/src
   cat > /root/bf2k/bench/src/gups.c <<'EOF'
   /* gups.c - HPCC RandomAccess 单进程内核（自写，表尺寸/时长可参数化）。
    * 对 2^lg 个 64 位字的表做随机地址流的读-改-写（T[idx] ^= ran），
-   * 指标 GUPS = 每秒 10^9 次随机更新。地址流 = 64 位 LFSR（全周期）。 */
+   * 指标 GUPS = 每秒 10^9 次随机更新。地址流 = 64 位 LFSR（全周期）。
+   * v2：计时改 CLOCK_MONOTONIC（aarch64 上 clock() 走系统调用，每次迭代
+   * ~700ns 计时开销主导速率）；每 1024 次更新才查一次时间。 */
   #include <stdint.h>
   #include <stdio.h>
   #include <stdlib.h>
@@ -190,25 +196,32 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   static inline uint64_t lfsr(uint64_t x){
       return (x << 1) | (((x >> 63) ^ (x >> 3) ^ (x >> 2) ^ (x >> 0)) & 1);
   }
+  static double now(void){
+      struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+      return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+  }
   int main(int argc, char **argv){
-      int lg = (argc > 1) ? atoi(argv[1]) : 20;      /* 表 = 2^lg 字 */
+      int lg = (argc > 1) ? atoi(argv[1]) : 20;        /* 表 = 2^lg 字 */
       double secs = (argc > 2) ? atof(argv[2]) : 30.0; /* 运行时长 */
       uint64_t n = 1ULL << lg, *T = calloc(n, 8);
       if (!T) { fprintf(stderr, "gups: alloc fail\n"); return 1; }
-      uint64_t ran = 0x123456789abcdef0ULL, upd = 0;
-      double end = (double)clock() / CLOCKS_PER_SEC + secs;
-      while (((double)clock() / CLOCKS_PER_SEC) < end) {
-          ran = lfsr(ran);
-          T[ran & (n - 1)] ^= ran;
-          upd++;
+      uint64_t ran = 0x123456789abcdef0ULL, upd = 0, i;
+      double t0 = now(), end = t0 + secs;
+      while (1) {
+          for (i = 0; i < 1024; i++) {
+              ran = lfsr(ran);
+              T[ran & (n - 1)] ^= ran;
+              upd++;
+          }
+          if (now() >= end) break;
       }
-      printf("GUPS lg=%d updates=%llu rate=%.3f GUP/s\n",
-             lg, (unsigned long long)upd, upd / secs / 1e9);
+      printf("GUPS lg=%d updates=%llu rate=%.3f GUP/s time=%.2fs\n",
+             lg, (unsigned long long)upd, upd / (now() - t0) / 1e9, now() - t0);
       return 0;
   }
   EOF
   gcc -O2 -o /root/bf2k/bench/bin/gups /root/bf2k/bench/src/gups.c
-  /root/bf2k/bench/bin/gups 20 3    # 冒烟：3 秒跑完，打印 GUP/s
+  /root/bf2k/bench/bin/gups 15 3    # 冒烟：3 秒跑完，打印 GUP/s（lg15 应快于 lg20）
   ```
 
 ### 0.3 数据与基准准备（BF2）
