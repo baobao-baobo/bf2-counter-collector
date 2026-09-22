@@ -66,12 +66,20 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   `-t UDP_STREAM`，sockperf 留到 RDMA 升级件时源码构建。
   下载：文件名拼到 `$M/...` 后 wget；`dpkg -i` 报缺依赖时缺什么同池补什么
   （贴回报错即可）。
+  **9/22 又添一坑**：`ubuntu0.1` 后缀≠focal 安全更新——luajit 的
+  `2.1.0~beta3+dfsg-6ubuntu0.1` 是 **jammy 版**（Depends libc6≥2.34，focal 只有
+  2.31），focal 只到 `+dfsg-6`。通则：focal 包不会要求 libc6>2.31，拿不准时先
+  `dpkg-deb -f x.deb Depends` 验明正身再装。另注意 luajit 在 **universe** 池
+  （sysbench 同源），不在 main。
 
   **已确认文件名（9/22 tuna 目录实查，按 focal 选；URL 里 `+` 要写 `%2B`）**：
   | 包 | 文件名 | 备注 |
   |---|---|---|
   | netperf（arm64，BF2+helong 各一份） | `netperf_2.7.0-0.1_arm64.deb` | 报错则换同目录 `netperf_2.6.0-2.1_arm64.deb`（bionic 版必兼容） |
-  | sysbench（arm64） | `sysbench_1.0.18+ds-1_arm64.deb` | 弃 1.0.20+ds-9（noble） |
+  | sysbench（arm64） | `sysbench_1.0.18+ds-1_arm64.deb` | 弃 1.0.20+ds-9（noble）；补链三包见下 |
+  | libluajit-5.1-2（arm64） | `libluajit-5.1-2_2.1.0~beta3+dfsg-6_arm64.deb` | universe 池；6ubuntu0.1=jammy 勿选 |
+  | libluajit-5.1-common（all） | `libluajit-5.1-common_2.1.0~beta3+dfsg-6_all.deb` | 与 -2 精确同版（= 咬合） |
+  | libpq5（arm64） | `libpq5_12.22-0ubuntu0.20.04.4_arm64.deb` | sysbench pg 驱动；12.16 不存在 |
   | gfortran-9（arm64） | `gfortran-9_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 同目录再拿 libgfortran-9-dev 同版本 |
   | libgfortran-9-dev（arm64） | `libgfortran-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 缺 libgfortran5 时报错贴回（libquadmath0 对 arm64 不存在，勿找） |
   | sockperf（arm64） | `sockperf_3.6-2build1_arm64.deb` | 试装；报 glibc 错→跳过（c6 回退已备） |
