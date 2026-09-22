@@ -42,17 +42,42 @@ df -h / /root            # eMMC 分区可用空间（需 ≥10GB：DB 2GB×2.5 +
 fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian 下载到临时目录，
 `scp` 到 BF2 的 `/tmp/`，再在 BF2 上构建。
 
+- **0.2.0 挑包通用方法（ports.ubuntu.com 目录已失效，改国内镜像站，fujian 上 curl 可列表）**
+
+  先确认系统版本（贴回）：
+  ```bash
+  cat /etc/os-release | head -3; uname -m    # 预期 Ubuntu 20.04 (focal) aarch64
+  ```
+  fujian 上列目录（tuna 首选，不通换 ustc/aliyun）：
+  ```bash
+  M=https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/pool
+  curl -s $M/universe/s/sysbench/  | grep -o 'sysbench_[^"]*arm64\.deb' | sort -u
+  curl -s $M/multiverse/n/netperf/ | grep -o 'netperf_[^"]*arm64\.deb' | sort -u
+  curl -s $M/universe/s/sockperf/  | grep -o 'sockperf_[^"]*arm64\.deb' | sort -u
+  curl -s $M/main/g/gcc-9/         | grep -o 'gfortran-9_[^"]*arm64\.deb\|libgfortran-9-dev_[^"]*arm64\.deb' | sort -u
+  # 不通时换：M=https://mirrors.ustc.edu.cn/ubuntu-ports/pool
+  #          M=https://mirrors.aliyun.com/ubuntu-ports/pool
+  ```
+  **关键陷阱**：pool 目录跨 Ubuntu 版本共享（focal/jammy/noble 的文件都在），
+  必须挑与 os-release 匹配的版本——focal 对应 sysbench `1.0.18+dfsg`、
+  netperf `2.7.0+git20191211`、gfortran-9 `9.4.0-1ubuntu1~20.04`。挑错版本
+  （如 jammy 的 sysbench 1.0.20）会因 glibc 太新跑不起来。sockperf 若目录里
+  没有 focal 版本（只有 jammy+）→ 按 c6 回退：UDP 轮改用 netperf
+  `-t UDP_STREAM`，sockperf 留到 RDMA 升级件时源码构建。
+  下载：文件名拼到 `$M/...` 后 wget；`dpkg -i` 报缺依赖时缺什么同池补什么
+  （贴回报错即可）。
+
 - **0.2.1 netperf（deb，fujian 一份 x86 + BF2 一份 arm64 + helong BF2 一份 arm64）**
   - fujian 端（跑 netserver 用）：`apt install -y netperf`
-  - arm64 包：浏览器/curl 打开目录 http://ftp.debian.org/debian/pool/non-free/n/netperf/
-    挑 `netperf_*_arm64.deb`（如 2.7.0+git20210121，~518KB）下载；BF2 上 `dpkg -i`。
-    `dpkg -i` 若报缺依赖，把缺的包名从同站下载 arm64 deb 逐个补装，报错贴回。
+  - arm64 包：按 0.2.0 从 `multiverse/n/netperf/` 挑 focal 版本下载；BF2 上
+    `dpkg -i`；缺依赖同池补装、报错贴回。
   - 装后验证：`netperf -V`、`netserver -V` 各出一行版本。
-- **0.2.2 sysbench（arm64 deb）**：目录 http://ports.ubuntu.com/ubuntu-ports/pool/universe/s/sysbench/
-  挑 `sysbench_*_arm64.deb`；`dpkg -i`；缺依赖（常见 libaio1）同站补装。
-  验证：`sysbench --version`。
-- **0.2.3 sockperf（arm64 deb）**：目录 http://ports.ubuntu.com/ubuntu-ports/pool/universe/s/sockperf/
-  挑 `sockperf_*_arm64.deb`（如 3.7-1）；`dpkg -i`。验证：`sockperf --version`。
+- **0.2.2 sysbench（arm64 deb）**：按 0.2.0 从 `universe/s/sysbench/` 挑 focal
+  版本（1.0.18）；`dpkg -i`；缺依赖同池补装（libaio1 设备已有）。验证：
+  `sysbench --version`。
+- **0.2.3 sockperf（arm64 deb）**：按 0.2.0 从 `universe/s/sockperf/` 检查；
+  有 focal 版本则装，只有 jammy+ 版本则跳过（按 0.2.0 回退）。验证：
+  `sockperf --version`。
 - **0.2.4 LevelDB db_bench（源码 cmake）**
   ```bash
   # fujian：wget https://github.com/google/leveldb/archive/refs/tags/1.23.tar.gz
@@ -71,12 +96,12 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   cp bin/*/lat_mem_rd bin/*/bw_mem /root/bf2k/bench/bin/
   ```
   编译报错则把报错贴回。
-- **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：fujian 打开目录
-  http://ports.ubuntu.com/ubuntu-ports/pool/main/g/gcc-9/ 挑
-  `gfortran-9_*_arm64.deb` 与 `libgfortran-9-dev_*_arm64.deb`（报缺 libquadmath0 /
-  libgfortran5 等时同目录补）→ scp → `dpkg -i`。装后 `gfortran --version` 应报 9.x；
-  依赖报错贴回。**回退方案**（deb 装不上时）：NPB 只编 IS（C 内核），EP 诚实负例
-  改 `sysbench cpu --cpu-max-prime=20000`，MG/CG/FT 三场暂缓。
+- **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：按 0.2.0 从
+  `main/g/gcc-9/` 挑 focal 版本的 `gfortran-9` 与 `libgfortran-9-dev`（报缺
+  libquadmath0 / libgfortran5 等时同目录补）→ scp → `dpkg -i`。装后
+  `gfortran --version` 应报 9.x；依赖报错贴回。**回退方案**（deb 装不上时）：
+  NPB 只编 IS（C 内核），EP 诚实负例改 `sysbench cpu --cpu-max-prime=20000`，
+  MG/CG/FT 三场暂缓。
 - **0.2.6 NPB 3.4.3（源码 make，五内核）**
   ```bash
   # fujian：wget https://www.nas.nasa.gov/assets/npb/NPB3.4.3.tar.gz
@@ -403,7 +428,9 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6d_rndrd_direct_run1.
 
 c6a/c6b 前置：fujian 上先起 `sockperf sr`（服务端，跑在后台）。sockperf 参数
 如有出入以 `sockperf --help` 为准（ul=压载客户端、-t 秒数、--mps 每秒消息数
-上限、--msg-size 字节、--udp 换 UDP）。
+上限、--msg-size 字节、--udp 换 UDP）。**sockperf 无 focal 包时的回退**：
+c6a 复用 c2b（netperf TCP_STREAM 出向）、c6b 改 `netperf -H 192.168.56.11
+-t UDP_STREAM -l 30 -- -m 1472`（同方向同报文尺寸，仅换传输）。
 
 ### 批次 3 判读标准
 
