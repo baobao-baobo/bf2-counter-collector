@@ -17,7 +17,7 @@
 
 | 路径                   | 机制                                                                                                   | 成本                                        | 输出                      | 定位               |
 | -------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------- | ---------------- |
-| **P1 OVS 流表计数**      | ovsbr1 加 `in_port=…,actions=NORMAL` 计数规则；offload 到 eSwitch 后 `ovs-ofctl dump-flows` 的 n_bytes 就是硬件计数 | **零安装**（设备已有 OVS+offload）                 | 每入口端口字节数                | **首选**，先验证       |
+| **P1 OVS 流表计数**      | ovsbr1 加 `in_port=…,actions=NORMAL` 计数规则；offload 到 eSwitch 后 `ovs-ofctl dump-flows` 的 n_bytes 就是硬件计数（**9/17 定案：仅 NAD 回流；NHD 只计 offload 前软件段 ~23% → NHD 改走物理口 sysfs/tc in_hw**） | **零安装**（设备已有 OVS+offload）                 | 每入口端口字节数                | **首选**，先验证       |
 | **P2 DOCA Flow 计数管** | 自写小程序 `collect_pipe.c`（参考官方 bifurcated-driver 应用）：pipe + entry counter + 每秒查询写 CSV                   | 需 DOCA SDK（NVIDIA 账号下载）+ 交叉编译             | 每类（入口端口/L4 端口号）字节数，粒度最细 | 正统 pipe，P1 不够细时上 |
 | **P3 镜像管**           | OVS mirror 到 SF（DOCA Flow Inspector 官方服务），Arm 用 DPDK 收真包                                             | 重（SF 配额 + DPDK 环境 + Arm 收包带宽瓶颈 ~6.6 Gbps） | 真包（可 5-tuple/落盘）        | 兜底/图 3 升级证据      |
 
@@ -29,7 +29,7 @@
 
 | 里程碑                                | 内容                                                               | 验收                                                                  |
 | ---------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
-| **M0 设备勘察**（§5 操作单，已执行 2026-09-15） | eSwitch/OFED/DOCA/OVS offload/SF 状态 + **P1 即时可行性测试**             | 已判读：**P1 失败**（offload 统计不回流，9.31GB 流量只计到 30KB）→ P1b 探针（§5.3）→ 否则 P2 |
+| **M0 设备勘察**（§5 操作单，已执行 2026-09-15） | eSwitch/OFED/DOCA/OVS offload/SF 状态 + **P1 即时可行性测试**             | 已判读：**P1 失败**（offload 统计不回流，9.31GB 流量只计到 30KB）→ P1b 探针（§5.3）→ 否则 P2【**9/17 更正**：判死仅对 NHD 成立，NAD 三层一致回流，见 §5.3 更正注】 |
 | **M1 工具链准备**（仅 P2 需要）              | DOCA SDK 下载（Windows 代理）→ WSL aarch64 交叉编译参考应用                    | 交叉编译产物在设备上能跑起来                                                      |
 | **M2 最小 pipe 计数**                  | P1：计数规则轮询脚本；P2：最小 pipe+entry counter 程序                          | iperf3 10G 打流时计数 ≈ 流量（±5%）                                          |
 | **M3 分类 pipe**                     | 入口端口分类（wire/host/Arm 三面）+ L4 端口分类（iperf3 5201 / redis 6379/6380） | NHD 与 56.x 分类结果与 E1 组合判据一致                                          |
@@ -45,7 +45,7 @@ timestamp,pipe_p1_bytes,pipe_p1_pkts,pipe_pf1hpf_bytes,pipe_pf1hpf_pkts,pipe_arm
 
 判读对照（以 E1-1 已核实的组合判据为准）：
 
-- NHD 场景：`pipe_p1_bytes` ≈ iperf3 速率；`pipe_pf1hpf` ≈ 0（同场景 pf1hpf_rx≈0）
+- NHD 场景：`pipe_p1_bytes` ≈ iperf3 速率（**9/17 起 pipe_p1 改读 p1 物理口 sysfs（ethtool -S p1）/ tc in_hw，不再用 OVS 规则**）；`pipe_pf1hpf` ≈ 0（同场景 pf1hpf_rx≈0）
 - NAD 前向：`pipe_pf1hpf_bytes` ≈ 速率、`pipe_p1` ≈ 0
 - 每类净流量 = 窗口均值 − idle 基线（沿用 G 系列口径）
 
@@ -158,6 +158,8 @@ diff /tmp/flows_before.txt /tmp/flows_after.txt
 ### 5.3 P1 测试结果与 P1b 补救探针（2026-09-15）
 
 **实测结果（P1 判死）**：iperf3 9.31GB / 8s / 10G / 0 重传（宿主侧干净 NHD）；但 BF2 上新规则仅计到 **30,285 B / 311 包**，catch-all 仅 +177KB，10 秒后再看无迟到统计 → OpenFlow 规则 n_bytes **不回流 offload 后的硬件转发流量**（只计慢路径残渣，占比 0.0003%）。对应 §5.2 判读第三分支。
+
+> **更正（2026-09-15 晚 → 09-17 定案）**："P1 判死"被推翻并收窄为**流量类型相关**规则：本测试打的是 NHD 流量，只证明 OVS 规则对 NHD 不回流。56.x NAD 测试（9/15 晚）三层一致——规则 n_bytes 8.74GB ≈ tc in_hw ≈ vport 增量 8.738GB（差 0.00015%）→ **offload 统计对 NAD（Arm 终接）100% 回流，P1 复活为 NAD 口径**。9/17 补验定案：**OVS 规则对 NHD 只计 offload 前软件段 ~23%**（10G×5s=5.82GB 只计 1.32GB，HW 统计不回流）→ **NHD 计数规则变更：改走 p1 物理口 sysfs（ethtool -S p1）/ tc in_hw**，§5.6 Part B 已证（tc in_hw 13.1GB = software 0 ≈ rx_bytes_phy 增量）。M2 验收（9/18）双口径采集器两路全过：pf1hpf 列 1514B/包 1:1（dump 铁证逐位一致）、p1 列 1518B/包（ethtool p1 Speed=100G）；含 dump-flows 头行 bug 修复（8c35e38）。
 
 **附带发现**：`ovs-ofctl del-flows` 不接受 priority 关键字（OF1.0 匹配语法，add 可用 del 不可用，实测报 `unknown keyword priority`）→ 删除改用 `del-flows "in_port=p1"`（§5.2.6 已修正）。
 
