@@ -120,6 +120,32 @@ def prov_of(ctr, prov):
     return tier, "/".join(sorted(notes))
 
 
+def divergence_notes(winner, attrib, grank):
+    """P2.5d: divergence between the global vertex ranking and the path
+    verdict.  N1 - the global peak vertex's dominant flow lands on a
+    path other than the winner; N2 - the global peak is not the
+    winner's top contributor yet reads higher than that contributor's
+    mean contribution.  Caliber note: v is an observed-row mean (a
+    vertex that never fires has no reading), c is a full-support mean
+    (zero-filled rows so it sums to L_p) - the comparison is a report
+    flag for human review, never a verdict input."""
+    notes = []
+    if not grank or not attrib:
+        return notes
+    top = grank[0]
+    if top["flow"] is not None and top["flow"] != winner:
+        notes.append("global peak vertex %s (v=%.3f) mainly flows to "
+                     "path %s, not the winning %s"
+                     % (top["vertex"], top["v"], top["flow"], winner))
+    if top["vertex"] != attrib[0]["vertex"] and \
+            top["v"] > attrib[0]["c"]:
+        notes.append("global peak vertex %s (v=%.3f) reads above the "
+                     "winner path's top contribution (%s c=%.3f)"
+                     % (top["vertex"], top["v"],
+                        attrib[0]["vertex"], attrib[0]["c"]))
+    return notes
+
+
 def search(scene, csvs, pipe=None, model=None):
     """Scene-level search.  Returns the evidence-chain dict."""
     if model is None:
@@ -138,10 +164,14 @@ def search(scene, csvs, pipe=None, model=None):
     contrib = {}       # (path, vertex) -> [v * M1 share] over app rows
     rowtop = {}        # path -> {vertex: rows where it tops that path}
     rowlp = {}         # path -> [row L_p] over app rows
+    vglob = {}         # vertex -> {(run id, row): v} over observed rows
+    vowners = {}       # vertex -> set of paths that observed it
+    napp = 0           # total app rows across runs (P2.5d obs denom)
     imax = None
-    for path in csvs:
+    for rid, path in enumerate(csvs):
         run, out = ab.run_one(path, pipe, paths, vertices, idle_v,
                               span_v, cap_v, unver, verbose=False)
+        napp += len(run.app_i)
         an = ab.Analyzer(paths, vertices, idle_v, span_v, cap_v, unver)
         for name, s, w, d, ws in out:
             if name == "idle":
@@ -180,6 +210,11 @@ def search(scene, csvs, pipe=None, model=None):
                     vrow.setdefault(key, []).append(v)
                     c = v * share
                     contrib.setdefault(key, []).append(c)
+                    vowners.setdefault(vname, set()).add(p)
+                    # dedup by (run, row): v is the raw vertex reading,
+                    # path-independent - a shared vertex reports the
+                    # same v under each owner path in one row
+                    vglob.setdefault(vname, {})[(rid, i)] = v
                     if c > topc:
                         topv, topc = vname, c
                     if label:
@@ -270,6 +305,53 @@ def search(scene, csvs, pipe=None, model=None):
     row_mean = (round(statistics.mean(rowlp[winner]), 3)
                 if rowlp.get(winner) else None)
 
+    # P2.5d: global vertex pressure ranking.  v = row-mean over
+    # OBSERVED rows only (a vertex that never fires has no reading;
+    # zero-filling would fake a "not stressed" verdict for blind
+    # spots).  flow = the owner path receiving the vertex's largest
+    # mean contribution (full-support caliber, same as attribution).
+    # This ranking answers "which observation point is closest to its
+    # saturation reference", not "which path is busiest" - the two
+    # can disagree, and divergence_notes surfaces exactly that.
+    grank = []
+    if verdict != "low":
+        for vname, obsv in vglob.items():
+            mv = statistics.mean(obsv.values())
+            owners = sorted(vowners[vname])
+            flows = {}
+            for p in owners:
+                cs = contrib.get((p, vname))
+                if cs:
+                    flows[p] = statistics.mean(cs)
+            flowp = max(flows, key=flows.get) if flows else None
+            flowc = round(flows[flowp], 3) if flowp else 0.0
+            labs = {}
+            for p in owners:
+                for l, lst in vlab.get((p, vname), {}).items():
+                    labs[l] = labs.get(l, 0) + len(lst)
+            label = max(labs, key=labs.get) if labs else None
+            lvals = []
+            if label:
+                for p in owners:
+                    lvals.extend(vlab.get((p, vname), {}).get(label, []))
+            mn = round(statistics.mean(lvals), 3) if lvals else None
+            ctr = []
+            if label:
+                ctr = [c for c in vertices[vname]["counters"]
+                       if "%s@%s" % (c.fam, c.expr)
+                       == label.split(":", 1)[1]]
+            tier, note = prov_of(ctr[0], prov) if ctr else (1, "unverified")
+            gated = sum(1 for c in vertices[vname]["counters"]
+                        if any(x in unver for x in c.components))
+            grank.append({"vertex": vname, "v": round(mv, 3),
+                          "obs": [len(obsv), napp],
+                          "flow": flowp, "flowc": flowc,
+                          "owners": owners, "label": label, "n": mn,
+                          "prov": note, "prov_tier": tier,
+                          "gated": gated})
+        grank.sort(key=lambda x: -x["v"])
+    gnote = divergence_notes(winner, attrib, grank)
+
     sat_sus = {l: round(sat_sum[l] / sat_tot[l], 3) for l in sat_tot
                if sat_tot[l] >= 10 and sat_sum[l] / sat_tot[l] >= 0.85}
     warnings = {"arbitration": sorted(warns), "sat_suspect": sat_sus,
@@ -286,6 +368,7 @@ def search(scene, csvs, pipe=None, model=None):
             "ranking": [(p, round(v, 3)) for p, v in ranking],
             "decomposition": decomp,
             "attrib": attrib, "lp_row_mean": row_mean,
+            "grank": grank, "gnote": gnote,
             "warnings": warnings,
             "idle_max": round(imax, 3) if imax is not None else None}
 
@@ -342,6 +425,32 @@ def report(sc, paths):
         print("    note: model-caliber contribution ranking, not causal "
               "localization (backpressure coverage and anchor provenance "
               "limits apply)")
+        gr = sc.get("grank") or []
+        if gr:
+            print("  global vertex pressure ranking (v = row-mean over "
+                  "observed rows; flow = owner path with the largest "
+                  "mean contribution):")
+            for i, g in enumerate(gr, 1):
+                line = ("    #%d %-8s v=%.3f obs=%d/%d flow=%s(c=%.3f) "
+                        "owners=%s" % (i, g["vertex"], g["v"],
+                                       g["obs"][0], g["obs"][1],
+                                       g["flow"] or "-", g["flowc"],
+                                       ",".join(g["owners"])))
+                if g["label"]:
+                    line += "  <- %s n=%.3f [%s]" % (g["label"], g["n"],
+                                                     g["prov"])
+                if g.get("gated"):
+                    line += "  (%d gated unverified)" % g["gated"]
+                if g["label"] in sc["warnings"].get("sat_suspect", {}):
+                    line += "  [SAT-SUSPECT anchor]"
+                print(line)
+            gn = sc.get("gnote") or []
+            if gn:
+                for note in gn:
+                    print("  divergence note: " + note)
+            else:
+                print("  divergence note: none (global peak flows to "
+                      "the %s path)" % sc["winner"])
     w = sc["warnings"]
     if w["blind"]:
         print("  blind-spot circumstantial evidence:")
@@ -564,12 +673,54 @@ def selfcheck():
                 ok = False
                 msg.append("expected near-tie %.3f vs %.3f"
                            % (att[0]["c"], att[1]["c"]))
+        # P2.5d gates: grank sorted descending, empty for low scenes,
+        # and no divergence note fires in these scenes (verified
+        # empirically - the global peak flows to the winning path).
+        gr = sc.get("grank") or []
+        vs = [g["v"] for g in gr]
+        if any(vs[i] < vs[i + 1] for i in range(len(vs) - 1)):
+            ok = False
+            msg.append("grank not descending")
+        for g in gr:
+            if g["obs"][0] > g["obs"][1] or g["obs"][1] <= 0:
+                ok = False
+                msg.append("obs %d>%d" % (g["obs"][0], g["obs"][1]))
+        if vexp == "low" and gr:
+            ok = False
+            msg.append("low scene has grank")
+        if sc.get("gnote"):
+            ok = False
+            msg.append("unexpected divergence note")
         status = "PASS" if ok else "FAIL"
         if status == "FAIL":
             fails.append("C:%s" % name)
         print("  %-14s verdict=%-9s top=%-8s %s%s" %
               (name, sc["verdict"], (att[0]["vertex"] if att else "-"),
                status, ("  " + "; ".join(msg)) if msg else ""))
+
+    # Instance C5: divergence_notes rule on fabricated inputs (the
+    # firing cases never occur in current data - sort's mss flows to
+    # ib at 98% of the winner's top c, so the rule is exercised
+    # synthetically).
+    print("instance C5 (divergence rule):")
+    syn = [
+        ("N1+N2 fire", "cr",
+         [{"vertex": "l3", "c": 0.115}],
+         [{"vertex": "mss", "v": 0.130, "flow": "ib"}], 2),
+        ("strict-> guard", "nad",
+         [{"vertex": "arm", "c": 0.124}],
+         [{"vertex": "eswitch", "v": 0.124, "flow": "nad"}], 0),
+        ("self-compare skip", "cr",
+         [{"vertex": "l3", "c": 0.115}],
+         [{"vertex": "l3", "v": 0.114, "flow": "cr"}], 0),
+    ]
+    for name, winner, attrib, grank, exp in syn:
+        got = len(divergence_notes(winner, attrib, grank))
+        ok = got == exp
+        if not ok:
+            fails.append("C5:%s" % name)
+        print("  %-18s notes=%d exp=%d %s" %
+              (name, got, exp, "PASS" if ok else "FAIL"))
 
     # Instance D: gnuplot render smoke test (P2.5c).
     print("instance D (plot render):")
