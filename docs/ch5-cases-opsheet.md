@@ -105,19 +105,33 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   cp bin/*/lat_mem_rd bin/*/bw_mem /root/bf2k/bench/bin/
   ```
   编译报错则把报错贴回。
-- **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：按 0.2.0 从
-  `main/g/gcc-9/` 挑 focal 版本的 `gfortran-9` 与 `libgfortran-9-dev`（报缺
-  libquadmath0 / libgfortran5 等时同目录补）→ scp → `dpkg -i`。装后
-  `gfortran --version` 应报 9.x；依赖报错贴回。**回退方案**（deb 装不上时）：
-  NPB 只编 IS（C 内核），EP 诚实负例改 `sysbench cpu --cpu-max-prime=20000`，
-  MG/CG/FT 三场暂缓。
+- **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：
+  **9/22 实测修正**：设备 gcc-9-base 是 `9.4.0-1ubuntu1~20.04.1`，而镜像池只剩
+  `.3`——gfortran-9 系列用精确版本号咬合（= .3 全套），连锁升级 gcc-9 有风险。
+  改为**全新安装 gfortran-10 家族**（包名与 gcc-9 无冲突、零升级风险）：
+  ```bash
+  # 先清掉刚才未配置成功的两个包：
+  dpkg -r libgfortran-9-dev gfortran-9
+  # fujian 上列目录拿 8 个包的确切文件名（版本 10.x-1ubuntu1~20.04，取最新）：
+  curl -s https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/pool/main/g/gcc-10/ \
+    | grep -o '\(gcc-10_\|cpp-10_\|gcc-10-base_\|libgcc-10-dev_\|libgfortran-10-dev_\|gfortran-10_\|libgfortran5_\|libquadmath0_\)[^"]*arm64\.deb' | sort -u
+  ```
+  下载这 8 个 → scp → **一条命令同时装**（互相解依赖）：
+  ```bash
+  dpkg -i gcc-10-base_*_arm64.deb gcc-10_*_arm64.deb cpp-10_*_arm64.deb \
+    libgcc-10-dev_*_arm64.deb libgfortran-10-dev_*_arm64.deb gfortran-10_*_arm64.deb \
+    libgfortran5_*_arm64.deb libquadmath0_*_arm64.deb
+  gfortran-10 --version      # 应报 10.x；NPB 用 gfortran-10 编译（见 0.2.6）
+  ```
+  缺依赖报错贴回。**回退方案**（仍装不上）：NPB 只编 IS（C 内核），EP 诚实负例
+  改 `sysbench cpu --cpu-max-prime=20000`，MG/CG/FT 三场暂缓。
 - **0.2.6 NPB 3.4.3（源码 make，五内核）**
   ```bash
   # fujian：wget https://www.nas.nasa.gov/assets/npb/NPB3.4.3.tar.gz
   #   （若 403/超时，搜索 "NPB3.4.3.tar.gz" 任一镜像下载）
   cd /tmp && tar xf NPB3.4.3.tar.gz && cd NPB3.4.3/NPB3.4-SER
   cp config/make.def.template config/make.def
-  sed -i 's/^CC.*/CC = gcc/; s/^F77.*/F77 = gfortran/; s/^FLINK.*/FLINK = gfortran/' config/make.def
+  sed -i 's/^CC.*/CC = gcc/; s/^F77.*/F77 = gfortran-10/; s/^FLINK.*/FLINK = gfortran-10/' config/make.def
   sed -i 's/-O/-O3/' config/make.def
   # 五个内核各编三档 class（S 可能太短、C 可能太久，B 为中间档）：
   for k in ep is mg cg ft; do for c in S A B; do make $k CLASS=$c; done; done
