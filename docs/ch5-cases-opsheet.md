@@ -127,14 +127,17 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   探针报 Failed（WSHORTEN_64_TO_32 / WD654 / WTHREAD_SAFETY /
   GNU_POSIX_REGEX）是 google benchmark 的特性探测——那些是 Clang 旗标，gcc
   不支持属预期，取回退路径，对功能/性能零影响。
-- **0.2.5 lmbench3（源码 make）+ gfortran 检查**
+- **0.2.5 lmbench3（源码 make）——9/22 实测一把过**
   ```bash
   # fujian：wget https://sourceforge.net/projects/lmbench/files/development/lmbench-3.0-a9/lmbench-3.0-a9.tgz/download -O lmbench.tgz
+  # scp lmbench.tgz 到 BF2 /tmp，然后（设备上执行）：
   cd /tmp && tar xf lmbench.tgz && cd lmbench-3.0-a9 && make -j8
-  ls bin/                      # 二进制在 bin/<arch>/ 子目录（如 aarch64-linux-gnu）
-  cp bin/*/lat_mem_rd bin/*/bw_mem /root/bf2k/bench/bin/
+  ls bin/                      # 产物直接位于 bin/（无 arch 子目录）
+  cp bin/lat_mem_rd bin/bw_mem /root/bf2k/bench/bin/
+  /root/bf2k/bench/bin/lat_mem_rd 16      # 冒烟：出一行 stride 延迟（ns）
+  /root/bf2k/bench/bin/bw_mem 1M rd       # 冒烟：出 1MB 读带宽（MB/s）
   ```
-  编译报错则把报错贴回。
+  实测记录：aarch64 探测与 rpc 编译均无碍（预判的两个坑都未触发）。
 - **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：
   **9/22 已实测通过**。路线结论（踩坑定案）：①gfortran-10 不存在——focal 从未
   发布 gcc-10 编译器本体（gcc-10 源包只构建运行时库；libquadmath0 对 arm64 不
