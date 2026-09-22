@@ -23,12 +23,18 @@
 
 ### 0.1 设备环境检查（BF2 上执行，输出贴回）
 
+**已回传（9/22）**：free 15GB 总 / 9GB available（**无 swap**）；**/tmp = tmpfs 仅
+7.8GB**；gfortran 缺失（只有 dpkg/gcc）；libibverbs + libaio 齐；rdma link：
+pf0hpf / pf1hpf / p1 / Arm 代表口均 ACTIVE（RoCE 链路层就绪，应用层待后续验证）。
+**两个资源结论（已按此修正全部轮次）**：
+① RAM 预算 9GB → GUPS 四表 6.6GB 下调为 3.3GB（见 c5b）；
+② **/tmp 是内存盘，数据放 /tmp 永远不会触 eMMC**——LevelDB/sysbench 数据必须落到
+eMMC 挂载点（本轮统一 `/root/bf2k/data/`，前提：根文件系统在 eMMC 上，待补查）。
+
+**补查（贴回）**：
 ```bash
-free -g                    # ≥8GB 空闲（GUPS 4 表共 6.6GB）
-df -h /tmp                 # ≥8GB 空闲（LevelDB 2GB + sysbench 4G）
-which gfortran dpkg gcc    # gfortran 缺失则按 0.2.5 装
-ldconfig -p | grep -E "ibverbs|aio"    # sockperf RDMA / sysbench 依赖侦察
-rdma link 2>/dev/null || ibstat 2>/dev/null || echo "no rdma tool"   # 仅侦察，不阻塞
+lsblk                    # 找 eMMC 设备与挂载点
+df -h / /root            # eMMC 分区可用空间（需 ≥10GB：DB 2GB×2.5 + sysbench 4G）
 ```
 
 ### 0.2 工具获取（fujian 下载 → scp → 设备，全部老流程）
@@ -64,8 +70,13 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   ls bin/                      # 二进制在 bin/<arch>/ 子目录（如 aarch64-linux-gnu）
   cp bin/*/lat_mem_rd bin/*/bw_mem /root/bf2k/bench/bin/
   ```
-  编译报错则把报错贴回。gfortran 若 0.1 缺失：fujian 下载 gfortran arm64 deb
-  （gcc-9/gcc-10 均可）scp 后 `dpkg -i`。
+  编译报错则把报错贴回。
+- **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：fujian 打开目录
+  http://ports.ubuntu.com/ubuntu-ports/pool/main/g/gcc-9/ 挑
+  `gfortran-9_*_arm64.deb` 与 `libgfortran-9-dev_*_arm64.deb`（报缺 libquadmath0 /
+  libgfortran5 等时同目录补）→ scp → `dpkg -i`。装后 `gfortran --version` 应报 9.x；
+  依赖报错贴回。**回退方案**（deb 装不上时）：NPB 只编 IS（C 内核），EP 诚实负例
+  改 `sysbench cpu --cpu-max-prime=20000`，MG/CG/FT 三场暂缓。
 - **0.2.6 NPB 3.4.3（源码 make，五内核）**
   ```bash
   # fujian：wget https://www.nas.nasa.gov/assets/npb/NPB3.4.3.tar.gz
@@ -115,14 +126,17 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
 
 ### 0.3 数据与基准准备（BF2）
 
+**数据目录必须落在 eMMC 挂载点**（/tmp 是 tmpfs，见 0.1 结论）。统一
+`/root/bf2k/data/`（根文件系统在 eMMC 上，由 0.1 补查的 lsblk/df 确认）。
+
 ```bash
+mkdir -p /root/bf2k/data && df -h /root/bf2k/data   # 确认挂载于 eMMC 且 ≥10GB 可用
 # LevelDB 测试库（2GB，供 c1e/c3e/c5a 读）：
-mkdir -p /tmp/dbtest
 /root/bf2k/bench/bin/db_bench --benchmarks=fillseq --num=2000000 \
-  --value_size=1000 --db=/tmp/dbtest    # 冒烟兼建库，~1–3 分钟，最后打印 ops/s
-ls -la /tmp/dbtest                        # 应有 ~2GB 的 .ldb 文件
-# sysbench 文件（4GB，供 c1f/c6c/c6d）：
-sysbench fileio --file-num=8 --file-total-size=4G prepare
+  --value_size=1000 --db=/root/bf2k/data/dbtest    # 冒烟兼建库，~1–3 分钟，最后打印 ops/s
+ls -la /root/bf2k/data/dbtest                       # 应有 ~2GB 的 .ldb 文件
+# sysbench 文件（4GB，供 c1f/c6c/c6d；文件建在当前目录，故先 cd）：
+cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G prepare
 ```
 
 ### 0.4 NPB class 时长标定（BF2，决定每个内核用哪档 class）
@@ -189,13 +203,14 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c1d_netin_run1.csv \
 #   先清页缓存（见下方"清缓存"说明）再跑：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c1e_dbmiss_run1.csv \
   -a "/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
-  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=100000 --db=/tmp/dbtest" \
-  -b 0-3 -t 600
+  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=100000 \
+  --db=/root/bf2k/data/dbtest" -b 0-3 -t 600
 
 # c1f sysbench 随机写文件（页缓存写+随机 eMMC 写 → cr/wb + io）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c1f_sbrndwr_run1.csv \
-  -a "sysbench fileio --file-num=8 --file-total-size=4G --file-test-mode=rndwr \
-  --file-block-size=16K --file-io-mode=sync --threads=4 --time=30 run" -b 0-3 -t 60
+  -a "cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G \
+  --file-test-mode=rndwr --file-block-size=16K --file-io-mode=sync --threads=4 \
+  --time=30 run" -b 0-3 -t 60
 ```
 
 **清缓存**（每次跑 eMMC 相关轮次前执行，防止页缓存把"存储访问"变成"内存命中"）：
@@ -260,14 +275,21 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3c_lat1m_run1.csv \
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3d_lat256m_run1.csv \
   -a "for i in 1 2; do /root/bf2k/bench/bin/lat_mem_rd 256 64; done" -b 0-3 -t 120
 
-# c3e db_bench 随机读·大缓存（4GB 块缓存 ≥ 2GB 库 → 全命中走内存 → cr；
-#   与 c1e 构成同一库、同一命令、仅 cache_size 不同的阈值翻转对）：
-#   注意：必须先清页缓存，否则 OS 页缓存会替块缓存"作弊"
+# c3e db_bench 随机读·大缓存（2GB 块缓存 ≈ 库大小 → 全命中走内存 → cr；
+#   与 c1e 构成同一库、同一命令、仅 cache_size 不同的阈值翻转对）。
+#   三步协议（冷读会拖 eMMC 混杂进窗，必须先预热）：
+#   ①清页缓存 → ②预热两遍（2M 读×2，块缓存装满，不入账）→ ③正式轮（不再 drop）
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=2147483648 --reads=2000000 \
+  --db=/root/bf2k/data/dbtest > /dev/null
+/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=2147483648 --reads=2000000 \
+  --db=/root/bf2k/data/dbtest > /dev/null
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3e_dbit_run1.csv \
   -a "/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
-  --num=2000000 --value_size=1000 --cache_size=4294967296 --reads=5000000 --db=/tmp/dbtest" \
-  -b 0-3 -t 300
+  --num=2000000 --value_size=1000 --cache_size=2147483648 --reads=5000000 \
+  --db=/root/bf2k/data/dbtest" -b 0-3 -t 300
 ```
 
 Case 4：
@@ -292,13 +314,13 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4c_memwr_run1.csv \
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4d_fillseq_run1.csv \
   -a "/root/bf2k/bench/bin/db_bench --benchmarks=fillseq --num=2000000 \
-  --value_size=1000 --db=/tmp/dbtest_fs" -b 0-3 -t 900
+  --value_size=1000 --db=/root/bf2k/data/dbtest_fs" -b 0-3 -t 900
 
 # c4e 随机灌库（随机写 50 万条 ~500MB → wb + 随机 eMMC 写；与 c4d 对照）：
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4e_fillrnd_run1.csv \
   -a "/root/bf2k/bench/bin/db_bench --benchmarks=fillrandom --num=500000 \
-  --value_size=1000 --db=/tmp/dbtest_fr" -b 0-3 -t 900
+  --value_size=1000 --db=/root/bf2k/data/dbtest_fr" -b 0-3 -t 900
 ```
 
 ### 批次 2 判读标准
@@ -329,25 +351,33 @@ tar czf /tmp/ch5_b2.tar.gz results/ch5_c3*.csv results/ch5_c3*.phase.log \
 
 ```bash
 # c5a db_bench×4 异缓存同库并发读（16M/64M/256M/1G，读量按缓存反比配平；
-#   M1 份额分解 + 四实例吞吐对照 = PathFinder Case 5 的 MBW×4 同构）：
+#   M1 份额分解 + 四实例吞吐对照 = PathFinder Case 5 的 MBW×4 同构）。
+#   诚实备注：四实例共享 OS 页缓存，per-instance 的"存储↔内存"对比会被抹平——
+#   本轮判读重点是聚合份额与多实例共存下的 M1 分解；干净的 per-instance 份额
+#   对照由 c5b（GUPS×4，纯内存表）承担：
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run1.csv \
   -a "sh -c '/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
-  --num=2000000 --value_size=1000 --cache_size=16777216 --reads=200000 --db=/tmp/dbtest > /tmp/db16.log 2>&1 & \
+  --num=2000000 --value_size=1000 --cache_size=16777216 --reads=200000 \
+  --db=/root/bf2k/data/dbtest > /tmp/db16.log 2>&1 & \
   /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
-  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=400000 --db=/tmp/dbtest > /tmp/db64.log 2>&1 & \
+  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=400000 \
+  --db=/root/bf2k/data/dbtest > /tmp/db64.log 2>&1 & \
   /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
-  --num=2000000 --value_size=1000 --cache_size=268435456 --reads=800000 --db=/tmp/dbtest > /tmp/db256.log 2>&1 & \
+  --num=2000000 --value_size=1000 --cache_size=268435456 --reads=800000 \
+  --db=/root/bf2k/data/dbtest > /tmp/db256.log 2>&1 & \
   /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
-  --num=2000000 --value_size=1000 --cache_size=1073741824 --reads=1600000 --db=/tmp/dbtest > /tmp/db1g.log 2>&1 & \
+  --num=2000000 --value_size=1000 --cache_size=1073741824 --reads=1600000 \
+  --db=/root/bf2k/data/dbtest > /tmp/db1g.log 2>&1 & \
   wait'" -b 0-3 -t 900
 
-# c5b GUPS×4 异表尺寸（128M/512M/2G/4G 各 60s → wb+cr miss 四路并发）：
+# c5b GUPS×4 异表尺寸（64M/256M/1G/2G 各 60s → wb+cr miss 四路并发；
+#   RAM 预算 9GB，四表共 3.3GB，下调自原案 6.6GB）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5b_gups4x_run1.csv \
-  -a "sh -c '/root/bf2k/bench/bin/gups 24 60 > /tmp/gups1.log 2>&1 & \
-  /root/bf2k/bench/bin/gups 26 60 > /tmp/gups2.log 2>&1 & \
-  /root/bf2k/bench/bin/gups 28 60 > /tmp/gups3.log 2>&1 & \
-  /root/bf2k/bench/bin/gups 29 60 > /tmp/gups4.log 2>&1 & wait'" -b 0-3 -t 120
+  -a "sh -c '/root/bf2k/bench/bin/gups 23 60 > /tmp/gups1.log 2>&1 & \
+  /root/bf2k/bench/bin/gups 25 60 > /tmp/gups2.log 2>&1 & \
+  /root/bf2k/bench/bin/gups 27 60 > /tmp/gups3.log 2>&1 & \
+  /root/bf2k/bench/bin/gups 28 60 > /tmp/gups4.log 2>&1 & wait'" -b 0-3 -t 120
 
 # c6a sockperf TCP 出向压载（BF2 客户端→fujian sr；ih/nad 出向签名）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6a_socktcp_run1.csv \
@@ -360,14 +390,15 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run1.csv \
 # c6c sysbench 随机读·页缓存模式（buffered：缺页+拷贝 → cr 参与）：
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6c_rndrd_buf_run1.csv \
-  -a "sysbench fileio --file-num=8 --file-total-size=4G --file-test-mode=rndrd \
-  --file-block-size=16K --file-io-mode=sync --threads=4 --time=30 run" -b 0-3 -t 60
+  -a "cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G \
+  --file-test-mode=rndrd --file-block-size=16K --file-io-mode=sync --threads=4 \
+  --time=30 run" -b 0-3 -t 60
 
 # c6d sysbench 随机读·O_DIRECT（绕过页缓存 → cr 分量消失、纯 io；与 c6c 对照）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6d_rndrd_direct_run1.csv \
-  -a "sysbench fileio --file-num=8 --file-total-size=4G --file-test-mode=rndrd \
-  --file-block-size=16K --file-io-mode=sync --file-extra-flags=direct --threads=4 --time=30 run" \
-  -b 0-3 -t 60
+  -a "cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G \
+  --file-test-mode=rndrd --file-block-size=16K --file-io-mode=sync \
+  --file-extra-flags=direct --threads=4 --time=30 run" -b 0-3 -t 60
 ```
 
 c6a/c6b 前置：fujian 上先起 `sockperf sr`（服务端，跑在后台）。sockperf 参数
@@ -416,12 +447,17 @@ tar czf /tmp/ch5_b3.tar.gz results/ch5_c5*.csv results/ch5_c5*.phase.log \
 
 ## 风险与回退
 
-- **gfortran 缺失** → NPB 只编 IS（C 内核），EP/MG/CG/FT 换 sysbench cpu/自写
-  模板/自写 FFT 替代（签名等价）；或从 fujian 拉 gfortran deb 补齐；
+- **gfortran 缺失** → 0.2.5 已给 deb 安装路径；装不上则 NPB 只编 IS（C 内核），
+  EP 诚实负例改 sysbench cpu，MG/CG/FT 暂缓（签名等价替代）；
 - **dpkg 依赖链缺失** → 逐包从同镜像补装，报错贴回即可，不阻塞其余构建；
+- **eMMC 空间不足（<10GB 可用）** → DB 2GB→1GB（num=1000000）、sysbench 4G→2G、
+  c4d/c4e 库减半，贴回 df 结果我按实数改参数；
+- **RAM 不足（GUPS 四表 3.3GB 仍紧张）** → 再降为 32M/128M/512M/1G（lg 22/24/26/27）；
 - **NPB 时长标定落空**（最快档 >90s）→ 用循环包装短档，或接受 60–90s 长窗；
-- **c3e 页缓存作弊**（判读仍 ib）→ drop_caches 后立即重跑一轮；
-- **sockperf RDMA/RoCE**：本批不启用（0.1 的 rdma link 仅侦察）；若侦察显示
-  Ready，后续单独补 RDMA 轮（Case 6 升级件）；
+- **c3e 页缓存作弊**（判读仍 ib）→ 三步协议（清缓存→预热→正式轮）已内建；仍
+  异常则重跑并核对 drop_caches 生效；
+- **sockperf RDMA/RoCE**：0.1 侦察显示 p1/pf1hpf 的 rdma link 均 ACTIVE
+  （RoCE 链路层就绪）——本批仍先跑 TCP/UDP，RDMA 轮升为**后续可做的 Case 6
+  升级件**（还需验证两卡间的 GID 路由）；
 - **c5a/c5b 并发写日志**：db_bench/GUPS 输出已重定向 /tmp，回传包已含；若
   某实例提前退出，其余照常，判读按 phase log 实际窗。
