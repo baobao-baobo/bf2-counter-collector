@@ -3,7 +3,7 @@
 版本 2026-09-22。回答两个问题：① 每个应用打在哪些路径的哪些计数器上；
 ② 目前全部计数器的锚点状态清单（真上限 / 观测下界 / 失效悬置）。
 数据源：`configs/anchor_sat.conf`（提取自 9/20 回填）、`configs/path_table.conf`、
-`tools/bfs_search.py` 逐场景分解（本日批量运行）、`docs/counter-failure-probe-opsheet.md`
+`tools/prism_search.py` 逐场景分解（本日批量运行）、`docs/counter-failure-probe-opsheet.md`
 §10 判死定论、`tools/replay_validate.py` 回放闸。
 
 ---
@@ -11,7 +11,7 @@
 ## 1. 应用×路径×计数器矩阵
 
 判定来自回放闸结论（`replay_validate.EXPECT`）；"点亮计数器"= 该场景下
-`bfs_search` 顶点分解的 argmax 计数器（顶点←计数器，n 为归一化压力值）。
+`prism_search` 顶点分解的 argmax 计数器（顶点←计数器，n 为归一化压力值）。
 
 ### 1.1 七应用主图（G1–G7）
 

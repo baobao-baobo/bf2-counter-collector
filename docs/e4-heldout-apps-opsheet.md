@@ -104,7 +104,7 @@ tar czf /tmp/e4_batch.tar.gz results/e4_*.csv results/e4_*.phase.log
 
 ## 判读标准（Claude 本地）
 
-本地命令：`python tools/bfs_search.py <csv> --scene <名>`（多文件按逗号列）
+本地命令：`python tools/prism_search.py <csv> --scene <名>`（多文件按逗号列）
 
 | 负载 | 期望判决 | 期望签名 | 不一致时的处置 |
 |---|---|---|---|

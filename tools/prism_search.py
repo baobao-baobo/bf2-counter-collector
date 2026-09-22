@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""bfs_search.py - scene-level busy-path search (P2.5).
+"""prism_search.py - scene-level busy-path search (P2.5).
 
-Search layer over the three-layer index, per docs/bfs-search-design.md:
+Search layer over the three-layer index, per docs/prism-search-design.md:
 given a scene window (one or more collector CSVs), answer "which data
 path is busiest right now?" with a reusable evidence chain.  The
 engine (load_model / Run / Analyzer / run_one of analyze_bottleneck.py)
@@ -25,12 +25,12 @@ Evidence chain (design doc sec 4):
   counters, blind-spot circumstantial evidence, degraded wins).
 
 Usage:
-  bfs_search.py <csv...> [--scene NAME] [--json out.json] [--pipe pipe.csv]
-  bfs_search.py <csv...> [--plot PREFIX]
+  prism_search.py <csv...> [--scene NAME] [--json out.json] [--pipe pipe.csv]
+  prism_search.py <csv...> [--plot PREFIX]
     writes PREFIX_mag.dat (per-path median L_p) + PREFIX_dir.dat
     (per-path row wins) + PREFIX.plt (two-panel gnuplot, magnitude
     and direction in one figure) + PREFIX.png
-  bfs_search.py --selfcheck
+  prism_search.py --selfcheck
     instance set A (17 replays): judgments must reproduce
     replay_validate.py's gate conclusions exactly (regression gate)
     instance set B (sat six faces): must match design doc sec 5

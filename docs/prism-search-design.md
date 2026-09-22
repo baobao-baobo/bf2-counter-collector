@@ -1,6 +1,6 @@
-# BFS 路径搜索设计（繁忙路径判定 + 实例验证）
+# PRISM 路径搜索设计（繁忙路径判定 + 实例验证）
 
-版本 2026-09-20。本文档定义三层索引引擎之上的**搜索层**——"BFS 算法"的
+版本 2026-09-20。本文档定义三层索引引擎之上的**搜索层**——"PRISM 搜索"的
 完整规格：搜索空间、判定规则、证据链输出、实例验证协议、实现形态。
 前置：`docs/bf2-bottleneck-queueing-model.md`（§4.6 三层索引）、
 `docs/bf2-pf-execution-plan.md`（M4 已通过）、`docs/validation-replay.md`
@@ -15,8 +15,9 @@
 > 哪条数据路径最繁忙？——并给出可解释的证据链。**
 
 与模型文档二轮修订的设计目标一致：路径级繁忙度判定；顶点级瓶颈定位
-与延迟归因留未来（§4.5 边界、未来工作清单）。"BFS"在此 = 沿路径图
-自入口向出口逐顶点推进的压力累加搜索，每次运行输出一个场景判决。
+与延迟归因留未来（§4.5 边界、未来工作清单）。"PRISM"在此 = 逐快照
+枚举各路径并沿入口 → 出口累加顶点压力指数（L_p = Σ v_j），再以双
+判据聚合输出一个场景判决。
 
 ## 1. 搜索空间：路径图（已定设计点 1）
 
@@ -117,24 +118,24 @@ L3 内部队列压力、PCIe TLR 队列、eSwitch 内部队列、Arm 软件队�
 > p7 上传（Arm→主机）根本不经过 wire 口 p1。实际判决 CR 居首，来源 =
 > TX DMA 读跳（tile_io_reads n≈1.0，混合流表现，与 NAD 的 DDR 跳同构，
 > 模型文档 §8.5）。Arm→主机出口路径不在路径模型中 → 未来工作（§7）。
-> 实现已同步：tools/bfs_search.py 的 SAT_EXPECT p7 = ("cr", False, ...)。
+> 实现已同步：tools/prism_search.py 的 SAT_EXPECT p7 = ("cr", False, ...)。
 
 **新增实例协议**：任何新场景（设备线新采集）入库后：跑搜索 → 记录
 判决 + 判读 → 并入实例表。实例表是论文"模型验证"章节的素材直接来源。
 
 ## 6. 实现形态
 
-`tools/bfs_search.py`：编排层（~150 行），复用 `analyze_bottleneck` 的
+`tools/prism_search.py`：编排层（~150 行），复用 `analyze_bottleneck` 的
 `load_model` / `Run` / `Analyzer` / `run_one`，不复制引擎逻辑。
 
 ```
-用法：python tools/bfs_search.py <csv...> [--scene NAME] [--json out.json]
-      python tools/bfs_search.py <csv...> [--plot PREFIX]
+用法：python tools/prism_search.py <csv...> [--scene NAME] [--json out.json]
+      python tools/prism_search.py <csv...> [--plot PREFIX]
 输入：场景 CSV（+ 可选 .phase.log 界定窗口；无相位日志按 5s 前后裁剪）
 输出：stdout 判决报告（§4 四件套）+ 可选 JSON 证据；
       --plot 另写 PREFIX_mag.dat / PREFIX_dir.dat / PREFIX.plt 并渲染
       PREFIX.png（§9 双面板图）
-回归：python tools/bfs_search.py --selfcheck
+回归：python tools/prism_search.py --selfcheck
      = 内置断言：实例集 A 判决 == replay_validate 结论；实例集 B 六面
        判决 == §5 表；实例集 C 归因门；实例集 D 渲染冒烟
        （作为 CI 型回归闸）

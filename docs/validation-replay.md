@@ -185,7 +185,7 @@ SAT-SUSPECT 仅为顶点级饱和判读的警示，路径级判读不受影响�
 空载段（idle_max 读数），应用窗与 med 判据不受影响。修复重跑块
 （chmod +x、pgrep 清理、g6 校准、g3/g7 双端）已入执行单 §9f。
 
-### 8.2 四有效场景的 BFS 判定（新场景协议）
+### 8.2 四有效场景的 PRISM 判定（新场景协议）
 
 | 场景   | 判决（本轮）                          | 与历史对照                                   |
 | ---- | ------------------------------- | --------------------------------------- |
@@ -338,7 +338,7 @@ C xz+UDP 并发（预期 CR/NAD 双高）。设备回传 5 轮 CSV + 相位日�
 1. **判决规则缺陷**：C 的 wins 首位无多数（14/35）触发平局条款
    （e1_g7 先例）被标 "low"，但 med 首位 0.584 是高载——平局条款本是
    低载场景条款（模型文档原文"整体低负载的场景"）。修复：三值化
-   dominant / low / multi（bfs_search.py，§8.6.3）。
+   dominant / low / multi（prism_search.py，§8.6.3）。
 2. **nad 入口方向再反（§8.5 误修）**：§8.5 把 nad 入口从 tx 改为 rx，
    依据是"tx 只量 ACK ~100 B/s"——方向读反了。实测量：2a 主机→Arm
    洪流时 en3f1pf1sf0_tx = **596–949MB/s**（洪流全量），rx =
@@ -354,10 +354,10 @@ C xz+UDP 并发（预期 CR/NAD 双高）。设备回传 5 轮 CSV + 相位日�
 
 - path_table.conf：nad entry → en3f1pf1sf0_rx_bytes+en3f1pf1sf0_tx_bytes
   （注释改写，含 2a/B 实测方向证据）；
-- bfs_search.py：判决三值化 dominant/low/multi（平局条款只在 med ≥0.2
+- prism_search.py：判决三值化 dominant/low/multi（平局条款只在 med ≥0.2
   时升级为 multi）；顶点贡献分解与排名统一用窗口均值（突发场景中位数
   被空载行稀释到 0，E2E B 先例）；自检实例 B 接受 multi；
-- docs/bfs-search-design.md §3/§4 同步三值化与均值口径。
+- docs/prism-search-design.md §3/§4 同步三值化与均值口径。
 - **双门复验（修复后实跑）**：replay 17/17 PASS、selfcheck 23/23
   ALL PASS；B 判决 dominant nad 0.541（tx 0.000、nhd 0.016=仅剩
   pcie0 双向链路进向中转的诚实残值）；C multi cr 0.584+nad 0.339。

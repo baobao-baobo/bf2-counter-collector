@@ -114,7 +114,7 @@ docs/saturation-calibration-opsheet.md、docs/bf2-bottleneck-queueing-model.md�
   2a/2b→NAD、e0_3 全低诚实。空载关 ≤0.15（L3 span 单样本轮换噪声，已核实到
   计数器级）。
 - **自检 23/23**：analyze_bottleneck --selfcheck（xz n_A72=0.342 手算==引擎）+
-  BFS 实例集 A 17/17 + B 6/6。
+  PRISM 实例集 A 17/17 + B 6/6。
 - **D2 七应用重跑复现**：g1 1.640/g2 1.265/g3 0.177/g4 0.120/g5 0.195/g6 0.070/
   g7 0.315，与历史 med 差 ≤0.025；g3/g7 流量 8.6Mbps≪历史 100Mbps 而 med 几乎
   不动 = 幅度判据对负载强度稳健。

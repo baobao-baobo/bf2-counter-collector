@@ -29,7 +29,7 @@ PRISM 是面向 BlueField-2（BF2）智能网卡的全片数据通道**瓶颈搜
  │ code/bf2-collector   │    tar 回传       │ tools/ 分析工具族          │
  │  └ 硬件计数器 (sysfs) │ ────────────────▶│  1. analyze_bottleneck.py │
  │     · 机制一/二       │   CSV + .phase.  │     （三层索引引擎）        │
- │     · delta 差分      │   log            │  2. bfs_search.py         │
+ │     · delta 差分      │   log            │  2. prism_search.py       │
  │  bench/ 负载程序      │                  │     （搜索/判决/归因/图）   │
  │ configs/*.conf ───────┤                  │  3. replay_validate.py    │
  │ （52 计数器/锚点/     │                  │     （回放回归门）          │
@@ -86,7 +86,7 @@ PRISM 是面向 BlueField-2（BF2）智能网卡的全片数据通道**瓶颈搜
 关键常量：`SHARE_EPS=1000 B/s`（M1 份额地板，防噪声入口独吞份额）、
 `VOTE_FLOOR=0.02`（方向投票下限，低于此值的行弃权）。
 
-### 3.4 搜索与判决层（`tools/bfs_search.py`，编排器）
+### 3.4 搜索与判决层（`tools/prism_search.py`，编排器）
 
 | 部件 | 职责 |
 | --- | --- |
@@ -112,7 +112,7 @@ PRISM 是面向 BlueField-2（BF2）智能网卡的全片数据通道**瓶颈搜
 | 位置 | 内容 |
 | --- | --- |
 | `fig/`（31 张，`tools/gen_fig_plts.py` / `gen_stack_plts.py`） | 并排图 28 张（原 10 + 二批 18）与堆叠图 3 张（l3_lookups / l3_rd_chain / tile_mem_reads_stack），统一 house 样式 |
-| `reports/` | bfs_search 渲染的路径压力双面板演示图（`*_paths.png` + .plt/.dat） |
+| `reports/` | prism_search 渲染的路径压力双面板演示图（`*_paths.png` + .plt/.dat） |
 | `docs/` | 设计文档族（索引见 §9） |
 
 ---
@@ -303,14 +303,14 @@ obs=观测行数 / flow=最大贡献路径 / owners=所属路径 / 锚点来源`
 
 ```bash
 # 单场景判决 + 归因 + 全局排序
-python tools/bfs_search.py results/e4/results/e4_http_run2.csv --scene e4_http_run2
+python tools/prism_search.py results/e4/results/e4_http_run2.csv --scene e4_http_run2
 
 # 加双面板图（gnuplot 渲染）
-python tools/bfs_search.py results/e4/results/e4_http_run2.csv \
+python tools/prism_search.py results/e4/results/e4_http_run2.csv \
     --scene e4_http_run2 --plot reports/e4_http_run2_paths
 
 # 全量回归自检（任何改动后必须全绿）
-python tools/bfs_search.py --selfcheck
+python tools/prism_search.py --selfcheck
 
 # 引擎直用（三层索引原始输出）
 python tools/analyze_bottleneck.py results/g1_run1.csv --out L.csv
@@ -326,7 +326,7 @@ python tools/replay_validate.py
 | 文档 | 内容 |
 | --- | --- |
 | `docs/bf2-bottleneck-queueing-model.md` | 模型数学设计（三层索引 §4.6、度量谱系、范围裁定） |
-| `docs/bfs-search-design.md` | 搜索层设计：搜索空间、判决协议、实例验证协议、P2.5b/c/d、边界 |
+| `docs/prism-search-design.md` | PRISM 搜索层设计：搜索空间、判决协议、实例验证协议、P2.5b/c/d、边界 |
 | `docs/bf2-pf-design-manual.md` | 教学版设计手册（对外宣讲用） |
 | `docs/validation-replay.md` | 回放验证全记录（17 会话、E2E 留出、引擎缺陷修复 H1/H2/H3） |
 | `docs/task41-paper-materials.md` | 论文化素材（三节草稿的数字与结论） |

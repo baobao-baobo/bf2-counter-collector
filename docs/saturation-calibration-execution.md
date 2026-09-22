@@ -280,7 +280,7 @@ tar czf sat_results_0918_1319.tar.gz sat_results_0918_1319/
 
 背景：9/20 锚点回填后 SAT-SUSPECT 仍有残余 obs-max 锚点，p4/p5 扩展
 配置（本批次前新提交）可给真应力值替换；D2 七应用重跑带 e1_esw 每口
-列（历史主图无每口列），是 BFS 实例表"新场景协议"的设备输入。命令
+列（历史主图无每口列），是 PRISM 实例表"新场景协议"的设备输入。命令
 全部自包含，一次上机跑完。
 
 ### 9a. 前置（本地线待批准 + fujian，~5 分钟）
@@ -290,8 +290,8 @@ tar czf sat_results_0918_1319.tar.gz sat_results_0918_1319/
 ```bash
 # Claude 本地（待批准后执行）：
 git add bench/configs/bench_p4_memrand.conf bench/configs/bench_p5_cache.conf \
-    bench/run_bench.sh tools/bfs_search.py docs/
-git commit -m "extend p4/p5 bench configs; add bfs_search layer; sync run_bench device fixes"
+    bench/run_bench.sh tools/prism_search.py docs/
+git commit -m "extend p4/p5 bench configs; add prism_search layer; sync run_bench device fixes"
 git push
 ```
 
@@ -405,9 +405,9 @@ cd /root/bf2k && tar czf d2_batch.tar.gz bench/results/p4_run*.csv \
 
 1. `extract_anchors.py sat` 再生成（p4/p5 真应力入锚点，provenance=
    bench-p4/p5，替换残余 obs-max）；
-2. 三关重验：replay_validate 17/17 + bfs_search --selfcheck 23/23；
-3. D2 七应用逐个跑 `bfs_search.py`（每场景 1 CSV = 1 窗口）→ 判决入
-   BFS 实例表（新场景协议）；与主图历史判决对照（g1/g2/g5/g6→cr、
+2. 三关重验：replay_validate 17/17 + prism_search --selfcheck 23/23；
+3. D2 七应用逐个跑 `prism_search.py`（每场景 1 CSV = 1 窗口）→ 判决入
+   PRISM 实例表（新场景协议）；与主图历史判决对照（g1/g2/g5/g6→cr、
    g3/g7→nad、g4→ib/ih 同量级）；
 4. 出三段式判读报告。
 
@@ -478,7 +478,7 @@ cd /root/bf2k && tar czf d2_batch.tar.gz bench/results/p4_run*.csv     bench/res
 回传后本地判读：p4/p5 入锚点再生成（provenance=bench-p4/p5 换掉
 SAT-SUSPECT 自引用 om）→ 三关重验（replay 17/17 + selfcheck 23/23，
 selfcheck B 的 p4/p5 面当前因本地旧 CSV 被覆盖而阻塞，回传即恢复）→
-d2_g3/g6/g7 入 BFS 实例表。
+d2_g3/g6/g7 入 PRISM 实例表。
 
 
 ## §9 收尾（2026-09-22 晚，§9f 修复重跑完成）

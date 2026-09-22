@@ -1,7 +1,7 @@
 # E2E 端到端验证操作单（2026-09-22）
 
 **目的**：完整闭环验证——在设备上运行**模型从未见过的留出负载**，用 e1_esw 配置采集计数器，
-回传本地后用 BFS 搜索层判读，得到繁忙路径结论，再与负载的独立语义预期对照。
+回传本地后用 PRISM 搜索层判读，得到繁忙路径结论，再与负载的独立语义预期对照。
 与历史回放的区别：回放用的是实例库内数据，本操作单的负载全部不在实例库中，
 判读结果是对模型泛化能力的直接检验。
 
@@ -72,7 +72,7 @@ tar czf /tmp/e2e_batch.tar.gz results/e2e_*.csv results/e2e_*.phase.log
 
 ## 判读标准（Claude 本地）
 
-本地命令：`python tools/bfs_search.py <csv> --scene <名> [--json results/e2e_<名>.json]`
+本地命令：`python tools/prism_search.py <csv> --scene <名> [--json results/e2e_<名>.json]`
 
 | 负载 | 期望判决 | 期望签名 |
 |---|---|---|
