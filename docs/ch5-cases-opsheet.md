@@ -106,35 +106,31 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   ```
   编译报错则把报错贴回。
 - **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：
-  **9/22 实测定案（两轮）**：①gfortran-10 路线判死——focal 从未发布 gcc-10 编译
-  器本体（gcc-10 源包只构建运行时库 gcc-10-base/libgcc-10-dev/libgfortran5，这
-  三个在池里；gcc-10/gfortran-10/cpp-10 编译器 20.10 起才有，逐文件 wget 实测
-  404；libquadmath0 对 arm64 不存在——aarch64 原生四精度，quadmath 库只给 x86）。
-  ②定案走 **gcc-9 .3 全套升级**（设备已有 .1 全家，全部 focal 原生版本、无跨版
-  本依赖）：
+  **9/22 已实测通过**。路线结论（踩坑定案）：①gfortran-10 不存在——focal 从未
+  发布 gcc-10 编译器本体（gcc-10 源包只构建运行时库；libquadmath0 对 arm64 不
+  存在）；②libgfortran5 只由 gcc-10 源构建（9.4.0 版逐文件 404 实测），且精确
+  咬合 gcc-10-base (= 同版)——设备镜像烤入的是池里没有的中间版 10.3.0；③终解
+  =双链同升：gcc-9 全家 .1→.3（含 libasan5）+ gcc-10 运行时全家 10.3.0→10.5.0。
+  18 个 deb 全部 focal 原生版本（libhwasan0 设备未装故不在列；若 `dpkg -l` 见
+  10.3.0 的它则补同版 10.5.0），fujian 下好 scp 后**一条命令全装**：
   ```bash
-  # fujian 下载（若前面 gfortran-9/libgfortran-9-dev 的 .3 已下过则复用）：
-  M=https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/pool/main/g/gcc-9
-  wget $M/gcc-9-base_9.4.0-1ubuntu1~20.04.3_arm64.deb
-  wget $M/cpp-9_9.4.0-1ubuntu1~20.04.3_arm64.deb
-  wget $M/libgcc-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb
-  wget $M/gcc-9_9.4.0-1ubuntu1~20.04.3_arm64.deb
-  # 还需 pool/main/g/gcc-10/ 的 libgfortran5_10.5.0-1ubuntu1~20.04_arm64.deb
-  #   （版本 10.5.0 > 9.4.0，满足 gfortran-9 的 >= 依赖；gcc-10-base/libgcc-10-dev 用不上）
-  ```
-  7 个包 scp → **一条命令同时装**（互相解依赖）：
-  ```bash
-  dpkg -i gcc-9-base_9.4.0-1ubuntu1~20.04.3_arm64.deb \
-    cpp-9_9.4.0-1ubuntu1~20.04.3_arm64.deb \
-    libgcc-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb \
-    gcc-9_9.4.0-1ubuntu1~20.04.3_arm64.deb \
-    libgfortran5_10.5.0-1ubuntu1~20.04_arm64.deb \
-    gfortran-9_9.4.0-1ubuntu1~20.04.3_arm64.deb \
-    libgfortran-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb
+  dpkg -i \
+    gcc-9-base_9.4.0-1ubuntu1~20.04.3_arm64.deb cpp-9_9.4.0-1ubuntu1~20.04.3_arm64.deb \
+    libgcc-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb libasan5_9.4.0-1ubuntu1~20.04.3_arm64.deb \
+    gcc-9_9.4.0-1ubuntu1~20.04.3_arm64.deb gfortran-9_9.4.0-1ubuntu1~20.04.3_arm64.deb \
+    libgfortran-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb \
+    gcc-10-base_10.5.0-1ubuntu1~20.04_arm64.deb libgcc-s1_10.5.0-1ubuntu1~20.04_arm64.deb \
+    libatomic1_10.5.0-1ubuntu1~20.04_arm64.deb libcc1-0_10.5.0-1ubuntu1~20.04_arm64.deb \
+    libgomp1_10.5.0-1ubuntu1~20.04_arm64.deb libitm1_10.5.0-1ubuntu1~20.04_arm64.deb \
+    liblsan0_10.5.0-1ubuntu1~20.04_arm64.deb libstdc++6_10.5.0-1ubuntu1~20.04_arm64.deb \
+    libtsan0_10.5.0-1ubuntu1~20.04_arm64.deb libubsan1_10.5.0-1ubuntu1~20.04_arm64.deb \
+    libgfortran5_10.5.0-1ubuntu1~20.04_arm64.deb
+  dpkg --configure -a
   gfortran-9 --version      # 应报 9.4.0；NPB 用 gfortran-9 编译（见 0.2.6）
   ```
-  缺依赖报错贴回。**回退方案**（仍装不上）：NPB 只编 IS（C 内核），EP 诚实负例
-  改 `sysbench cpu --cpu-max-prime=20000`，MG/CG/FT 三场暂缓。
+  分步装会报依赖挂起（9/22 实测：先 7 包后补 12 包收尾亦可，同一终态）；缺包
+  报错贴回。**回退方案**（仍装不上）：NPB 只编 IS（C 内核），EP 诚实负例改
+  `sysbench cpu --cpu-max-prime=20000`，MG/CG/FT 三场暂缓。
 - **0.2.6 NPB 3.4.3（源码 make，五内核）**
   ```bash
   # fujian：wget https://www.nas.nasa.gov/assets/npb/NPB3.4.3.tar.gz
