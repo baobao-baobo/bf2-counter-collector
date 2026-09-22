@@ -67,6 +67,15 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   下载：文件名拼到 `$M/...` 后 wget；`dpkg -i` 报缺依赖时缺什么同池补什么
   （贴回报错即可）。
 
+  **已确认文件名（9/22 tuna 目录实查，按 focal 选；URL 里 `+` 要写 `%2B`）**：
+  | 包 | 文件名 | 备注 |
+  |---|---|---|
+  | netperf（arm64，BF2+helong 各一份） | `netperf_2.7.0-0.1_arm64.deb` | 报错则换同目录 `netperf_2.6.0-2.1_arm64.deb`（bionic 版必兼容） |
+  | sysbench（arm64） | `sysbench_1.0.18+ds-1_arm64.deb` | 弃 1.0.20+ds-9（noble） |
+  | gfortran-9（arm64） | `gfortran-9_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 同目录再拿 libgfortran-9-dev 同版本 |
+  | libgfortran-9-dev（arm64） | `libgfortran-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 缺 libgfortran5/libquadmath0 时报错贴回同池补 |
+  | sockperf（arm64） | `sockperf_3.6-2build1_arm64.deb` | 试装；报 glibc 错→跳过（c6 回退已备） |
+
 - **0.2.1 netperf（deb，fujian 一份 x86 + BF2 一份 arm64 + helong BF2 一份 arm64）**
   - fujian 端（跑 netserver 用）：`apt install -y netperf`
   - arm64 包：按 0.2.0 从 `multiverse/n/netperf/` 挑 focal 版本下载；BF2 上
