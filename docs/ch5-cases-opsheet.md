@@ -95,16 +95,37 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
 - **0.2.3 sockperf（arm64 deb）**：按 0.2.0 从 `universe/s/sockperf/` 检查；
   有 focal 版本则装，只有 jammy+ 版本则跳过（按 0.2.0 回退）。验证：
   `sockperf --version`。
-- **0.2.4 LevelDB db_bench（源码 cmake）**
+- **0.2.4 LevelDB db_bench（源码 cmake）——9/22 实测通过，submodule 坑已钉死**
+  GitHub release tarball **不含 submodule 内容**：third_party/googletest 与
+  third_party/benchmark 解出来是空目录。而 db_bench 链接 gmock/gtest，这两个库
+  目标只在 `-DLEVELDB_BUILD_TESTS=ON` 时被创建；TESTS=ON 又触发 CMakeLists.txt:304
+  `add_subdirectory(third_party/benchmark)` → 两个 submodule 都得补。全套命令：
   ```bash
-  # fujian：wget https://github.com/google/leveldb/archive/refs/tags/1.23.tar.gz
-  # scp 到 BF2 /tmp，然后：
-  cd /tmp && tar xf 1.23.tar.gz && cd leveldb-1.23 && mkdir -p build && cd build
-  cmake .. -DCMAKE_BUILD_TYPE=Release -DLEVELDB_BUILD_TESTS=OFF -DLEVELDB_BUILD_BENCHMARKS=ON
+  # fujian 下载三个包（~/bbbb/app）后 scp 到 BF2 /tmp：
+  #   wget https://github.com/google/leveldb/archive/refs/tags/1.23.tar.gz
+  #   wget https://github.com/google/googletest/archive/refs/tags/release-1.12.1.tar.gz -O googletest-1.12.1.tar.gz
+  #   wget https://github.com/google/benchmark/archive/refs/tags/v1.7.1.tar.gz -O benchmark-1.7.1.tar.gz
+  cd /tmp && tar xf 1.23.tar.gz && cd leveldb-1.23 && cd third_party
+  mkdir -p googletest && tar xf /tmp/googletest-1.12.1.tar.gz --strip-components=1 -C googletest
+  mkdir -p benchmark  && tar xf /tmp/benchmark-1.7.1.tar.gz  --strip-components=1 -C benchmark
+  cd /tmp/leveldb-1.23
+  # 给 db_bench 补 gtest/gmock 头文件路径。append 到文件尾，勿用 sed 行内插：
+  # pattern 前缀会误伤 db_bench_sqlite3/db_bench_tree_db；heredoc 引号保住 ${...}
+  cat >> CMakeLists.txt <<'EOF'
+  target_include_directories(db_bench PRIVATE ${PROJECT_SOURCE_DIR}/third_party/googletest/googlemock/include
+  ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
+  EOF
+  mkdir -p build && cd build
+  cmake .. -DCMAKE_BUILD_TYPE=Release -DLEVELDB_BUILD_TESTS=ON -DLEVELDB_BUILD_BENCHMARKS=ON
   make -j8
   cp db_bench /root/bf2k/bench/bin/
   /root/bf2k/bench/bin/db_bench --version   # 打印 "leveldb version 1.23"
   ```
+  踩坑记录：①改 CMakeLists.txt 后必须重跑 cmake（make 只触发
+  cmake_check_build_system，不重新生成）；②configure 阶段 `HAVE_CXX_FLAG_*`
+  探针报 Failed（WSHORTEN_64_TO_32 / WD654 / WTHREAD_SAFETY /
+  GNU_POSIX_REGEX）是 google benchmark 的特性探测——那些是 Clang 旗标，gcc
+  不支持属预期，取回退路径，对功能/性能零影响。
 - **0.2.5 lmbench3（源码 make）+ gfortran 检查**
   ```bash
   # fujian：wget https://sourceforge.net/projects/lmbench/files/development/lmbench-3.0-a9/lmbench-3.0-a9.tgz/download -O lmbench.tgz
