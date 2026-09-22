@@ -119,7 +119,8 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   cmake .. -DCMAKE_BUILD_TYPE=Release -DLEVELDB_BUILD_TESTS=ON -DLEVELDB_BUILD_BENCHMARKS=ON
   make -j8
   cp db_bench /root/bf2k/bench/bin/
-  /root/bf2k/bench/bin/db_bench --version   # 打印 "leveldb version 1.23"
+  /root/bf2k/bench/bin/db_bench --benchmarks=fillseq --num=1000 --value_size=100
+  # 验收 = 首行 "LevelDB:    version 1.23"；--version 旗标 1.23 已移除（报 Invalid flag）
   ```
   踩坑记录：①改 CMakeLists.txt 后必须重跑 cmake（make 只触发
   cmake_check_build_system，不重新生成）；②configure 阶段 `HAVE_CXX_FLAG_*`
