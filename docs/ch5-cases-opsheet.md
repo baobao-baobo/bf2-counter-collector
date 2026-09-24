@@ -546,8 +546,49 @@ tar czf /tmp/ch5_b3.tar.gz results/ch5_c5*.csv results/ch5_c5*.phase.log \
 
 | 轮 | CSV | 窗长 | 判决 | L_p 均值 (cr/ih/ib/wb/nad/nhd/tx) | 预期 | 结论 |
 |---|---|---|---|---|---|---|
-| c1a | | | | | low | |
-| … | | | | | | |
+| c1a | ch5_c1a_ep_run1.csv | 应用 21s + 空载尾 284s | dominant cr (med 0.535) | 0.535/0.191/0.416/0.003/0/0/0 | low | **预期设错（A 类）**：EP 非纯计算，持续 13.5M/s a72_access、4.4M/s mem_reads、1.78M/s 旁路读 → 修订预期 dominant cr 弱档；ib=0.416 为真实旁路读（bypass 非 I/O 专属再证）；cr 排序 EP 0.535<IS 0.754<FT 1.879 支持判别力 |
+| c1b | ch5_c1b_is_run1.csv | 应用 20s + 尾 280s | dominant cr (0.754) | 0.754/0.304/0.224/0.050/0/0/0 | dominant cr | PASS；wb 未现"中度"（0.050），同 c1c 注，不阻塞 |
+| c1c | ch5_c1c_ft_run1.csv | 应用 42s + 尾 268s | dominant cr (1.879) | 1.879/0.706/0.866/0.025/0/0/0 | dominant cr；ib 可见 | PASS；ib=0.866"可见"实证 ✓（FT 流式读旁路）；wb 转置写未显著（两轮 NPB 同现象，待 Part 6 标定替换后复核） |
+| c1d | ch5_c1d_netin_run1.csv | 应用 30s + 尾 40s | dominant nad (1.882) | 0.839/1.225/0.590/0.010/1.882/0.063/0 | dominant nad；en3f1_rx 抬升 | PASS；ih=1.225 即 en3f1_rx io 域抬升，符合预期 |
+| c1e | ch5_c1e_dbmiss_run1.csv | 应用 67s + 尾 533s | low (med leader ih 0.069) | 0.042/0.069/0.023/0.001/0/0/0 | dominant ib/ih | **不一致**：io_reads 全程≈0.002M/s、无冷读尖峰（前 30s 亦无）；两假说：①清缓存未执行（页缓存 9GB 吞 2GB 库）②eMMC 读不经过 tile_io_reads（走 MSS 相干路径或计数器盲区）。重跑（drop_caches 内联进 payload）裁决 |
+| c1f | （缺轮，未回传） | — | — | — | dominant cr 或 wb | **未执行**，补跑 |
+| c2b | ch5_c2b_netout_run1.csv | 应用 1s（netperf 秒退） | low（七路径全 0） | 全 0 | dominant ih（E2 armsend 签名） | **执行失败（C 类）**：netperf 1s 退出=连不上 fujian netserver（c1d 13:56 尚活、14:34 失败 → 服务端终端被关）。重跑前 ss 查 12865 |
+| c2c | ch5_c2c_tx_run1.csv | 应用 1s（netperf 秒退） | low（七路径全 0） | 全 0 | tx 点亮 | **执行失败（C 类）**：同 c2b，helong netserver 检查 + ping 10.99.99.3 |
+
+**批次一判定：未通过（4/7 PASS，<80%）**——3 轮干净 PASS（c1b/c1c/c1d）+ 1 轮预期修订 PASS（c1a）；4 轮待补跑（c1e 重跑、c2b/c2c 重跑、c1f 补跑）。全部不一致均可诊断，无引擎缺陷；补跑后复评。
+
+### 批次一补跑块（9/24）
+
+```bash
+# 前置 1：fujian 检查 netserver（c1d 之后终端可能被关）
+ss -tlnp | grep 12865        # 空 → netserver -D -4 重起（占住终端）
+# 前置 2：helong BF2 同样检查 12865；主 BF2 上：
+ping -c 1 192.168.56.11 && ping -c 1 10.99.99.3   # 均通再跑
+
+# c2b 重跑（输出改 run2 保留首轮失败留痕）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2b_netout_run2.csv \
+  -a "netperf -H 192.168.56.11 -t TCP_STREAM -l 30" -b 0-3 -t 60
+# 若仍秒退：把 netperf 打印的报错行贴回（"establish control: ..."）
+
+# c2c 重跑：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2c_tx_run2.csv \
+  -a "netperf -H 10.99.99.3 -t TCP_STREAM -l 30" -b 0-3 -t 60
+
+# c1f 补跑（原命令）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c1f_sbrndwr_run1.csv \
+  -a "cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G \
+  --file-test-mode=rndwr --file-block-size=16K --file-io-mode=sync --threads=4 \
+  --time=30 run" -b 0-3 -t 60
+
+# c1e 重跑（drop_caches 内联，杜绝漏执行；输出 run2）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c1e_dbmiss_run2.csv \
+  -a "sync; echo 3 > /proc/sys/vm/drop_caches; \
+  /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=100000 \
+  --db=/root/bf2k/data/dbtest" -b 0-3 -t 600
+# 判读裁决：io_reads 仍≈0 → eMMC 读路径计数器盲区（E 类，论文素材）；
+#            io_reads 点亮 → 原轮为暖缓存执行问题（C 类），run2 即有效轮
+```
 
 ## 风险与回退
 
