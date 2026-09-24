@@ -554,19 +554,23 @@ tar czf /tmp/ch5_b3.tar.gz results/ch5_c5*.csv results/ch5_c5*.phase.log \
 | c1f | ch5_c1f_sbrndwr_run1.csv | 应用 31s + 尾 34s | low (cr 0.064) | 0.064/0.040/0.032/0.001/0/0/0 | dominant cr 或 wb | **预期设错（A 类）定案**：eMMC 随机写仅 ~4.5MB/s（io_reads 0.071M/s×64B），a72/mem 域 6–9× 抬升但绝对值小 → 判 low 如实；**纯写负载点亮 io_reads（140×）**=方向交叉实证的另一半（与 c1e 互证 0x73/0x74 设备视角）；预期修订 low |
 | c2b | ch5_c2b_netout_run2.csv | 应用 30s | dominant nad (1.566) | 0.493/1.067/0.316/0.003/1.566/0.667/0.011 | dominant ih（E2 armsend 签名） | **准 PASS（预期微调）**：流量真实（en3f1_rx=pf1hpf_tx 1416M/s≈11.3Gbps 1:1、ACK 回程 2.8M/s）；ih+nad 双亮签名复现（ih 1.067 与 E2 1.000 同量级），但 arm 顶点饱和（n=0.967 打满 6.6Gbps cap 锚点、SAT-SUSPECT 如实）后份额路由给 nad → 头名 ih→nad 漂移；与 E2"近平局、缺口=主机写入侧"边界标注一致；tx≈0 ✓、p1 未用 ✓ |
 | c2c | ch5_c2c_tx_run1.csv（旧失败文件复打包） | 应用 1s | — | — | tx 点亮 | **仍未重跑**（新包时间戳与旧轮逐字节一致）；helong netserver 检查后跑 run2 |
+| c2c | ch5_c2c_tx_run2.csv | 应用 31s | low（tx 0.001） | 0.045/0.017/0.022/0.001/0/0.004/0.001 | tx 点亮 | **姿势错误（C 类）+ 配置事实发现**：netperf 连上 helong 跑满 30s、p1_tx 13M/s（~104Mbps）+ACK 0.28M/s 回程=流量真实，但 **en3f1_rx=0.0000（Arm 数据口分文未动）**；pcie1_tx 15.3M/s≈pcie0_rx 15.3M/s 全程 1:1 对账 → Arm 数据走 pcie1 出主机、fujian 主机软件转发投回 BF2（pf1hpf_rx 13M/s→p1 出线）=**主机折返**；**主 BF2 的 Arm 与 p1 无二层直连**（§5.6 ping 通一直是折返路，掩盖至今）；速率卡 ~104Mbps（折返瓶颈）；引擎 tx=0.001 如实（13M/s÷12.5GB/s 线速锚点=0.001）；**pcie0_tx 53M/s（≈4×线速）记账未解留待考**。改主机口径重跑（tx=主机→网络的本来定义） |
 
-**批次一判定：实质通过（7/8=87.5%≥80%）**——3 轮干净 PASS（c1b/c1c/c1d）+ 4 轮预期修订 PASS（c1a/c1e/c1f/c2b）；**仅剩 c2c 补跑**后正式闭环。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出两条论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感。
+**批次一判定：实质通过（7/8=87.5%≥80%）**——3 轮干净 PASS（c1b/c1c/c1d）+ 4 轮预期修订 PASS（c1a/c1e/c1f/c2b）；c2c 两轮（连接失败/主机折返）均诊断完毕，**待主机口径 run3 后闭环**。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感 ③**主 BF2 Arm↔p1 无二层直连（主机折返实证）**——§5.6 相关结论需加折返脚注。
 
-### 批次一补跑块（9/24）——仅剩 c2c
+### 批次一补跑块（9/24）——仅剩 c2c 主机口径 run3
 
 ```bash
-# helong BF2 上检查 netserver：
-ss -tlnp | grep 12865        # 空 → netserver -D -4 重起（占住终端）
-# 主 BF2 上确认连通后重跑（输出 run2 保留旧失败留痕）：
-ping -c 1 10.99.99.3
-sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2c_tx_run2.csv \
-  -a "netperf -H 10.99.99.3 -t TCP_STREAM -l 30" -b 0-3 -t 60
-# 若仍秒退：把 netperf 打印的报错行贴回（"establish control: ..."）
+# 服务端：优先放 helong 的 x86 主机（收包不受 Arm 6.6Gbps 平台限制，可推到 10Gbps+）：
+#   helong 上先看 10.99.99.3 是否可见：ip addr | grep 10.99.99
+#   可见（representor 映射到主机）→ helong 主机上：netserver -D -4
+#   不可见 → 维持 helong BF2 Arm 上的 netserver（已起；速率上限 ~6.6Gbps，tx n≈0.07 勉强）
+# 客户端放 fujian 主机（tx=主机→网络 的本来定义）：
+netperf -H 10.99.99.3 -t TCP_STREAM -l 45
+# 主 BF2 上同时起采集（sleep 占窗，两秒内先后启动即可；45s 流量落在 55s 窗内）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2c_tx_run3.csv \
+  -a "sleep 55" -b 0-3 -t 70
+# 备选（Arm 出向原教旨）：主 BF2 贴回 ovs-vsctl show，我给加桥命令（p1 桥加 en3f1pf1sf0+配 10.99.99.2/24）
 ```
 
 ## 风险与回退
