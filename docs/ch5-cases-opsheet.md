@@ -361,23 +361,37 @@ tar czf /tmp/ch5_b1.tar.gz results/ch5_c1*.csv results/ch5_c1*.phase.log \
 
 ## 批次 2：Case 3（工作集转移）+ Case 4（访问模式转移）
 
+> 9/30 标定复核（执行前对账）：0.4 标定（9/23）推翻初版命令的时长假设——MG S 单轮
+> 仅 0.01s、lat_mem_rd 单轮亚秒级，固定循环次数撑不起应用窗。c3a/c3c/c3d 改为
+> 时长预算循环（timeout 硬终止，run_phase.sh 不检查退出码，124 无碍；窗口到期前
+> 应用先死，余时为 post-idle）；c3b 定档 B×3；c4d/c4e 窗长维持 900s（fillrandom
+> 在 eMMC 上的时长上界不明，宁大勿小）。若 timeout 缺失（coreutils 应已随批次 0
+> 装齐），回退写法：`for i in $(seq 1 N); do ...; done`，N 按实测单轮时长折算（MG S
+> 约 100 轮/s、lat_mem_rd 约 1–5 轮/s，取整撑 ~60s）。
+
 ```bash
-# c3a MG 小工作集（32³ 网格 ~2MB，接近 L2 驻留；单轮太短故循环 10 次）：
+# c3a MG 小工作集（32³ 网格 ~2MB，接近 L2 驻留；0.4 标定单轮 0.01s，"循环 10 次"
+#   仅 0.1s 不成立 → 时长预算 90s；循环内 fork/exec 开销会垫高 a72 基线 ~2×，
+#   判决以 victim/wb 差值为主，见判读标准）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3a_mgs_run1.csv \
-  -a "for i in 1 2 3 4 5 6 7 8 9 10; do /root/bf2k/bench/bin/mg.S.x; done" -b 0-3 -t 120
-
-# c3b MG 大工作集（256³ ~200MB，纯 DRAM；档位按 0.4 标定，A 或 B）：
-sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3b_mga_run1.csv \
-  -a "/root/bf2k/bench/bin/mg.<档>.x" -b 0-3 -t 300
-
-# c3c lmbench 指针链 1MB（L2 量级，延迟低；循环 15 次撑窗）：
-sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3c_lat1m_run1.csv \
-  -a "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do /root/bf2k/bench/bin/lat_mem_rd 1 64; done" \
+  -a "timeout 90 sh -c 'while true; do /root/bf2k/bench/bin/mg.S.x >> /tmp/c3a_mgs.log 2>&1; done'" \
   -b 0-3 -t 120
 
-# c3d lmbench 指针链 256MB（纯 DRAM+TLB 失效，延迟 ~150ns+；循环 2 次）：
+# c3b MG 大工作集（256³ ~200MB，纯 DRAM；0.4 标定定档 B=10.7s/轮 → 循环 3 次
+#   撑 32s 应用窗，余 268s 空载尾）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3b_mgb_run1.csv \
+  -a "for i in 1 2 3; do /root/bf2k/bench/bin/mg.B.x; done" -b 0-3 -t 300
+
+# c3c lmbench 指针链 1MB（L2 量级，延迟 ~10ns；单轮亚秒级 → 时长预算 60s；
+#   跑前先单发一次 lat_mem_rd 1 64 核对输出表头的区段上限=1MB）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3c_lat1m_run1.csv \
+  -a "timeout 60 sh -c 'while true; do /root/bf2k/bench/bin/lat_mem_rd 1 64 >> /tmp/c3c_lat.log 2>&1; done'" \
+  -b 0-3 -t 120
+
+# c3d lmbench 指针链 256MB（纯 DRAM+TLB 失效，延迟 ~150ns+；单轮约秒级 → 时长预算 60s）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3d_lat256m_run1.csv \
-  -a "for i in 1 2; do /root/bf2k/bench/bin/lat_mem_rd 256 64; done" -b 0-3 -t 120
+  -a "timeout 60 sh -c 'while true; do /root/bf2k/bench/bin/lat_mem_rd 256 64 >> /tmp/c3d_lat.log 2>&1; done'" \
+  -b 0-3 -t 120
 
 # c3e db_bench 随机读·大缓存（2GB 块缓存 ≈ 库大小 → 全命中走内存 → cr；
 #   与 c1e 构成同一库、同一命令、仅 cache_size 不同的阈值翻转对）。
@@ -431,7 +445,7 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4e_fillrnd_run1.csv \
 
 | 轮 | 期望判决 | 期望签名 | 不一致处置 |
 |---|---|---|---|
-| c3a | cr 低（对比参照） | a72/victim 低于 c3b（工作集近 L2） | 三类诊断 |
+| c3a | cr 低（对比参照） | a72/victim 低于 c3b（工作集近 L2）；时长预算循环的 exec 开销垫高 a72 基线 ~2× 属预期，对比以 victim/wb 为主 | 三类诊断 |
 | c3b | dominant cr（对比 c3a 明显抬升） | a72 高、victim/wb 中度 | 同上 |
 | c3c | cr 低 | 指针链 1MB 延迟 ~10ns 量级（对照 c3d 的 ~150ns） | 同上 |
 | c3d | dominant cr（对比 c3c 抬升） | 256MB 链 = 纯 DRAM+TLB；**判读口径**：cr 指归一化压力，指针追逐是"深度"非"带宽"，cr 抬升幅度预计温和 | 同上 |
