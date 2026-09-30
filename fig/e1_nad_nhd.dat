@@ -1,0 +1,5 @@
+iperf-NAD 0.0079 6.0664
+iperf-NHD 10.0096 0.0002
+Redis-Arm 0.0319 0.1029
+Redis+SQLite 0.0298 0.0961
+Redis-Host 0.0750 0.0002

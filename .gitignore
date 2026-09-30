@@ -47,3 +47,9 @@ bench-bin.tar.gz
 
 # Local plotting toolchain (portable gnuplot 6.0.2, re-downloadable)
 tools/gnuplot/
+
+# Device-return tarballs and data (kept locally + on device, not repo material)
+results/
+ch5_b1.tar.gz
+netperf_2.7.0-0.1_arm64.deb
+__pycache__/
