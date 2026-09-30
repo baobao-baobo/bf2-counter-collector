@@ -369,6 +369,15 @@ tar czf /tmp/ch5_b1.tar.gz results/ch5_c1*.csv results/ch5_c1*.phase.log \
 > 装齐），回退写法：`for i in $(seq 1 N); do ...; done`，N 按实测单轮时长折算（MG S
 > 约 100 轮/s、lat_mem_rd 约 1–5 轮/s，取整撑 ~60s）。
 
+### 执行前检查（30 秒 ×3，跑批次 2 前做）
+
+```bash
+which timeout          # 应输出 /usr/bin/timeout；若无，用上方回退写法（seq 折算）
+/root/bf2k/bench/bin/lat_mem_rd 1 64     # 看表头最后一行区段是否 ≈1MB（确认参数=区段大小）
+/root/bf2k/bench/bin/lat_mem_rd 256 64   # 同上 ≈256MB
+df -h /root/bf2k/data   # eMMC 剩余 ≥40G（批次 0 验过 42G；c4d/c4e 新增 ~2.5GB 库）
+```
+
 ```bash
 # c3a MG 小工作集（32³ 网格 ~2MB，接近 L2 驻留；0.4 标定单轮 0.01s，"循环 10 次"
 #   仅 0.1s 不成立 → 时长预算 90s；循环内 fork/exec 开销会垫高 a72 基线 ~2×，
@@ -460,7 +469,8 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4e_fillrnd_run1.csv \
 
 ```bash
 tar czf /tmp/ch5_b2.tar.gz results/ch5_c3*.csv results/ch5_c3*.phase.log \
-  results/ch5_c4*.csv results/ch5_c4*.phase.log
+  results/ch5_c4*.csv results/ch5_c4*.phase.log \
+  /tmp/c3a_mgs.log /tmp/c3c_lat.log /tmp/c3d_lat.log
 ```
 
 ---
