@@ -369,14 +369,20 @@ tar czf /tmp/ch5_b1.tar.gz results/ch5_c1*.csv results/ch5_c1*.phase.log \
 > 装齐），回退写法：`for i in $(seq 1 N); do ...; done`，N 按实测单轮时长折算（MG S
 > 约 100 轮/s、lat_mem_rd 约 1–5 轮/s，取整撑 ~60s）。
 
-### 执行前检查（30 秒 ×3，跑批次 2 前做）
+### 执行前检查（9/30 已执行，全过）
 
 ```bash
-which timeout          # 应输出 /usr/bin/timeout；若无，用上方回退写法（seq 折算）
-/root/bf2k/bench/bin/lat_mem_rd 1 64     # 看表头最后一行区段是否 ≈1MB（确认参数=区段大小）
-/root/bf2k/bench/bin/lat_mem_rd 256 64   # 同上 ≈256MB
-df -h /root/bf2k/data   # eMMC 剩余 ≥40G（批次 0 验过 42G；c4d/c4e 新增 ~2.5GB 库）
+which timeout          # ✓ /usr/bin/timeout，时长预算循环可用
+/root/bf2k/bench/bin/lat_mem_rd 1 64     # ✓ 表头至 1.00000MB（参数语义确认：首参=区段
+                                         #   MB 上限、次参=步长×64B=4KB）；1MB 档 8.5ns
+/root/bf2k/bench/bin/lat_mem_rd 256 64   # ✓ 表头至 256.00000MB；256MB 档 14.7ns
+df -h /root/bf2k/data   # ✓ 36G 可用（59G 盘已用 20G；c4d/c4e 新增 ~2.5GB 绰绰有余）
 ```
+
+> **9/30 检查发现（已入判读标准）**：BF2 实测 DRAM 指针追逐 14.7ns（4KB 步长），远低于
+> 教科书 ~150ns → c3d 预期从"cr 抬升温和"上调为"明显"：14.7ns/跳 ≈ 单核 68M 跳/s ≈
+> 4GB/s DRAM 读流量（与 c1c FT 同量级）；c3c 1MB 链 8.5ns 几乎不出 L2，低 cr 参照不受
+> 影响。成因留待考（BF2 mesh 延迟低 / 64KB 页粒度减 TLB 走表 / 页表命中等，不影响设计）。
 
 ```bash
 # c3a MG 小工作集（32³ 网格 ~2MB，接近 L2 驻留；0.4 标定单轮 0.01s，"循环 10 次"
@@ -391,13 +397,13 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3a_mgs_run1.csv \
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3b_mgb_run1.csv \
   -a "for i in 1 2 3; do /root/bf2k/bench/bin/mg.B.x; done" -b 0-3 -t 300
 
-# c3c lmbench 指针链 1MB（L2 量级，延迟 ~10ns；单轮亚秒级 → 时长预算 60s；
-#   跑前先单发一次 lat_mem_rd 1 64 核对输出表头的区段上限=1MB）：
+# c3c lmbench 指针链 1MB（实测 8.5ns，几乎不出 L2；单轮亚秒级 → 时长预算 60s；
+#   参数语义已核实：首参=区段 MB 上限、次参=步长×64B=4KB）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3c_lat1m_run1.csv \
   -a "timeout 60 sh -c 'while true; do /root/bf2k/bench/bin/lat_mem_rd 1 64 >> /tmp/c3c_lat.log 2>&1; done'" \
   -b 0-3 -t 120
 
-# c3d lmbench 指针链 256MB（纯 DRAM+TLB 失效，延迟 ~150ns+；单轮约秒级 → 时长预算 60s）：
+# c3d lmbench 指针链 256MB（实测 14.7ns/跳 ≈ 4GB/s DRAM 读流量；单轮约秒级 → 时长预算 60s）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c3d_lat256m_run1.csv \
   -a "timeout 60 sh -c 'while true; do /root/bf2k/bench/bin/lat_mem_rd 256 64 >> /tmp/c3d_lat.log 2>&1; done'" \
   -b 0-3 -t 120
@@ -456,8 +462,8 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4e_fillrnd_run1.csv \
 |---|---|---|---|
 | c3a | cr 低（对比参照） | a72/victim 低于 c3b（工作集近 L2）；时长预算循环的 exec 开销垫高 a72 基线 ~2× 属预期，对比以 victim/wb 为主 | 三类诊断 |
 | c3b | dominant cr（对比 c3a 明显抬升） | a72 高、victim/wb 中度 | 同上 |
-| c3c | cr 低 | 指针链 1MB 延迟 ~10ns 量级（对照 c3d 的 ~150ns） | 同上 |
-| c3d | dominant cr（对比 c3c 抬升） | 256MB 链 = 纯 DRAM+TLB；**判读口径**：cr 指归一化压力，指针追逐是"深度"非"带宽"，cr 抬升幅度预计温和 | 同上 |
+| c3c | cr 低 | 指针链 1MB 实测 8.5ns，几乎不出 L2（对照 c3d 的 14.7ns） | 同上 |
+| c3d | dominant cr（对比 c3c 明显抬升） | 256MB 链实测 14.7ns/跳 ≈ 单核 68M 跳/s ≈ 4GB/s DRAM 读（9/30 实测上调自"温和"）；指针追逐仍是"深度"型负载（依赖链不可流水），cr 绝对值或低于同带宽顺序流 | 同上 |
 | c3e | dominant cr（与 c1e 阈值翻转） | a72 高、io 低（页缓存清后全命中内存）；c1e↔c3e 一对 = 存储↔内存翻转 | 若仍判 ib 先查页缓存是否未清（重跑前必须 drop_caches） |
 | c4a | dominant cr（流式） | a72 高、bypass 可见 | 三类诊断 |
 | c4b | dominant cr（miss 主导） | a72 高 + victim/wb 高于 c4a（随机逐出） | 同上 |
