@@ -330,6 +330,8 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2b_netout_run1.csv \
 
 # c2c 真 tx 路径（BF2→helong BF2 经 p1 100G；helong netserver 须先起，
 #   ping 通 10.99.99.3 后跑 → p1_tx 点亮 tx + Arm 出向）：
+# 【已废弃（9/30）】：Arm→p1 出向在 eSwitch SF 入向断联（三轮诊断定案），
+#   改为主机口径 run3（见批次一补跑块与记录表），本命令留档备查。
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2c_tx_run1.csv \
   -a "netperf -H 10.99.99.3 -t TCP_STREAM -l 30" -b 0-3 -t 60
 ```
@@ -345,7 +347,7 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2c_tx_run1.csv \
 | c1e | dominant ib/ih（io 域） | io_reads 抬升、a72 轻微（miss 读不重算）；与 c3e 对照用 | 同上 |
 | c1f | dominant cr 或 wb | a72 写+io 读（eMMC DMA 读缓存区）+eMMC 随机写 | 同上 |
 | c2b | dominant ih（E2 armsend 签名） | ih 1.0 量级+nad 近平局；tx≈0（不经 p1） | 同上 |
-| c2c | tx 点亮 | p1_tx 抬升（tx 路径首证）；nad 随行（Arm 处理）；与 c2b 对照 | 同上 |
+| c2c | tx 点亮（9/30 主机口径修订） | p1_tx 抬升（tx 路径首证）；nad 不随行（主机→网络 HW 转发、Arm 不参与）；与 c2b 对照 | 同上 |
 
 ### 回传（批次 1）
 
@@ -555,10 +557,13 @@ tar czf /tmp/ch5_b3.tar.gz results/ch5_c5*.csv results/ch5_c5*.phase.log \
 | c2b | ch5_c2b_netout_run2.csv | 应用 30s | dominant nad (1.566) | 0.493/1.067/0.316/0.003/1.566/0.667/0.011 | dominant ih（E2 armsend 签名） | **准 PASS（预期微调）**：流量真实（en3f1_rx=pf1hpf_tx 1416M/s≈11.3Gbps 1:1、ACK 回程 2.8M/s）；ih+nad 双亮签名复现（ih 1.067 与 E2 1.000 同量级），但 arm 顶点饱和（n=0.967 打满 6.6Gbps cap 锚点、SAT-SUSPECT 如实）后份额路由给 nad → 头名 ih→nad 漂移；与 E2"近平局、缺口=主机写入侧"边界标注一致；tx≈0 ✓、p1 未用 ✓ |
 | c2c | ch5_c2c_tx_run1.csv（旧失败文件复打包） | 应用 1s | — | — | tx 点亮 | **仍未重跑**（新包时间戳与旧轮逐字节一致）；helong netserver 检查后跑 run2 |
 | c2c | ch5_c2c_tx_run2.csv | 应用 31s | low（tx 0.001） | 0.045/0.017/0.022/0.001/0/0.004/0.001 | tx 点亮 | **姿势错误（C 类）+ 配置事实发现**：netperf 连上 helong 跑满 30s、p1_tx 13M/s（~104Mbps）+ACK 0.28M/s 回程=流量真实，但 **en3f1_rx=0.0000（Arm 数据口分文未动）**；pcie1_tx 15.3M/s≈pcie0_rx 15.3M/s 全程 1:1 对账 → Arm 数据走 pcie1 出主机、fujian 主机软件转发投回 BF2（pf1hpf_rx 13M/s→p1 出线）=**主机折返**；**主 BF2 的 Arm 与 p1 无二层直连**（§5.6 ping 通一直是折返路，掩盖至今）；速率卡 ~104Mbps（折返瓶颈）；引擎 tx=0.001 如实（13M/s÷12.5GB/s 线速锚点=0.001）；**pcie0_tx 53M/s（≈4×线速）记账未解留待考**。改主机口径重跑（tx=主机→网络的本来定义） |
+| c2c | ch5_c2c_host_run1.csv（主机口径 run3） | 应用 56s（流 30s，28s 在窗内） | low（tx 0.027，leader nhd 0.048） | 0.002/0.000/0.010/0.000/0.010/0.048/0.027 | tx 点亮（nad 删） | **实质 PASS（预期修订 A 类）**：netperf 跑满 30s ~5.5Gbps 稳态、三层一致（pcie0_rx 683M/s≈pcie1_tx 685M/s≈p1_tx 5s 均值 712M/s）→ **p1_tx 抬升=tx 路径首证 ✓**；**Arm 分文未动**（pcie1_rx 2.5M/s 平、tile 近空载、SF 列全零）→ eSwitch HW 转发正常、nad 不随行=主机口径设计意图，预期删 nad；速率卡 ~5.5Gbps≈helong Arm netserver 收包平台（~6Gbps 估计）；netdev 计数 5s 锯齿=统计上报伪影（5s 合计与 TLR 稳态口径一致）；**pcie1_tx 计入主机→ASIC 穿透 TLP**（E0-1/c2b 交叉实证；与 pcie0_tx 53M/s 同列账目待考）；流前 3s 落 pre-idle（启动时序偏斜，不影响判定） |
 
-**批次一判定：实质通过（7/8=87.5%≥80%）**——3 轮干净 PASS（c1b/c1c/c1d）+ 4 轮预期修订 PASS（c1a/c1e/c1f/c2b）；c2c 两轮（连接失败/主机折返）均诊断完毕，**待主机口径 run3 后闭环**。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感 ③**主 BF2 Arm↔p1 无二层直连（主机折返实证）**——§5.6 相关结论需加折返脚注。
+**批次一判定：闭环通过（8/8=100%≥80%，9/30）**——3 轮干净 PASS（c1b/c1c/c1d）+ 5 轮预期修订/环境限制 PASS（c1a/c1e/c1f/c2b/c2c 主机口径 run3）；c2c 三轮（连接失败/主机折返/主机口径）全部诊断完毕，**批次一结束**。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感 ③**主 BF2 Arm↔p1 无二层直连（主机折返实证）**——§5.6 相关结论需加折返脚注 ④**tx 路径首证（9/30 c2c run3）**：主机→网络 p1 出口 5.5Gbps 稳态、eSwitch HW 转发（Arm 不参与）；pcie1_tx 穿透 TLP 记账怪癖留待考；netdev 计数 5s 锯齿伪影（TLR 口径稳态）→ 论文 eSwitch 环境限制脚注素材齐（SF 入向死亡点+折返+共享交换机段）。
 
-### 批次一补跑块（9/24）——仅剩 c2c 主机口径 run3
+### 批次一补跑块（9/24 开，9/30 闭环）——c2c 主机口径已执行完毕（记录表末行 ch5_c2c_host_run1.csv）
+
+以下命令留档备查（实际执行：netperf 30s、run_phase `-a "sleep 55" -t 70`）：
 
 ```bash
 # 服务端：优先放 helong 的 x86 主机（收包不受 Arm 6.6Gbps 平台限制，可推到 10Gbps+）：
