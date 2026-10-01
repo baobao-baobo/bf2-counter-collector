@@ -72,47 +72,91 @@ supports — which is what PRISM provides.
 没有受害者应用级指标（吞吐率）与撤离恢复的成对证据。这正是 DPUSCOPE §3 的骨架，
 也是假设叙事最硬的那根钉。
 
-## 4. Case 7 提案：受害者-撤离迷你实验（5 轮，补上缺口）
+## 4. Case 7 提案：受害者-撤离迷你实验（5+1 轮，补上缺口）
 
-设计思路：受害者 = `gups 20`（8MB 表随机更新，lg20 已标定 0.018 GUP/s，跑满 60s、
-自带速率输出——天然的应用级吞吐指标）；干扰者按论点换装；撤离用"独立上下文"
-（单独一轮重跑受害者）实现，与 DPUSCOPE 的分段上下文做法同构。
+### 4.1 受害者选型（10/01 定案：db_bench 为主）
+
+- **gups**：决定性（~2.3GB/s DRAM 随机压力与干扰者正面竞争，降幅预计 30-60%）、
+  时长精确、零自噪；但"应用味"为零（自研微内核）。
+- **db_bench readrandom（内存驻留口径）**：应用味足（DPU 上的 KV 存储服务租户，
+  LevelDB 真实栈）；DRAM 流量仅 ~100MB/s 量级、以 CPU+延迟敏感为主，m2 内存干扰
+  的降幅预计温和（5-20%）——**这恰是 DPUSCOPE 自己的模式**（其内存工作者案例仅
+  1.92% 吞吐/11.71% P99，同核案例 49.82% 才是大头），叙事反而更贴范本。
+- **定案**：db_bench 为主（师兄侧重应用）；gups 降为可选第 6 轮决定性对照（成本
+  仅 +90s），在 db_bench 的 m2 降幅 <5% 时启用，作为"内存干扰确实存在、只是
+  db_bench 不敏感"的决定性注脚。
+- **致命前提**：受害者必须用内存驻留口径（cache_size=2GB + 每轮三步预热协议，
+  即 c3e 口径）。若用 c1e 的 64MB 小缓存口径，受害者瓶颈在 eMMC（c1e 已证
+  io_write 115×），内存干扰者打不动它，m2 直接废掉。
+
+### 4.2 每轮通用三步预热协议（run_phase 之前执行）
+
+```bash
+sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=2147483648 --reads=2000000 \
+  --db=/root/bf2k/data/dbtest > /dev/null
+/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=2147483648 --reads=2000000 \
+  --db=/root/bf2k/data/dbtest > /dev/null
+```
+
+（原理：db_bench 的块缓存随进程退出消失，预热真正保温的是 Linux 页缓存——2M 读
+×2 把整库读进页缓存，正式轮的读全从内存命中，不再碰 eMMC。）
 
 | 轮 | 场景 | 命令要点 | 期望（先写死，判读对账） |
 |---|---|---|---|
-| m1 | 受害者基线 | gups 20 60 钉核 0 | 速率 ≈0.018 GUP/s；计数器低-中档 |
-| m2 | +内存干扰者 | gups(核0) + sysbench memory seq ×3 线程(核1-3) 60s | 速率明显下降（预期 ≥20%）；wb/cr+内存流签名抬升 |
-| m3 | 撤离（重跑受害者） | 同 m1 | 速率恢复 ≈m1（≥95%）→ 责任成立 |
-| m4 | +繁忙传输 | gups + fujian→helong 经 p1 的 netperf 60s（c2c 姿势，helong netserver 前置） | 速率 ≈m1（±5%）；tx/nhd 高涨而 Arm 域不动 → 活跃≠归责 |
-| m5 | +同核忙循环 | gups(核0) + `while true; do :; done`(核0) 60s | 速率腰斩；a72/cr 签名与 m2 可区分 → 不同边界不同症状、PRISM 判别力 |
+| m1 | 受害者基线 | db_bench 3M 读（2GB 缓存）钉核 0 | ops/s 基线；计数器低-中档 |
+| m2 | +内存干扰者 | +sysbench memory seq ×3 线程(核1-3) 60s | ops/s 温和下降（5-20%）；流签名（cr/wb）抬升 |
+| m3 | 撤离（重跑受害者） | 同 m1 | ops/s 恢复 ≈m1（±5%）→ 责任成立 |
+| m4 | +繁忙传输 | +fujian→helong 经 p1 的 netperf 60s（c2c 姿势，helong netserver 前置） | ops/s ≈m1（±5%）；tx/nhd 高涨而 Arm 域不动 → 活跃≠归责 |
+| m5 | +同核忙循环 | +`while true; do :; done`(核0) 60s | ops/s 明显下降（≥30%，同核抢占）→ 与 m2 签名可区分 → 边界判别 |
+| m6（可选） | gups 决定性对照 | 受害者换 gups 20 60，干扰者同 m2 | rate 较 0.018 GUP/s 降 ≥30% |
 
 ```bash
-# m1 受害者基线（gups 20 60 = 8MB 表跑 60s，速率落 /tmp/m1_victim.log）：
+# m1 受害者基线（3M 读 ≈50s；速率落 /tmp/m1_victim.log 末行 micros/op）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m1_victim_run1.csv \
-  -a "taskset -c 0 /root/bf2k/bench/bin/gups 20 60 > /tmp/m1_victim.log 2>&1" -b 0-3 -t 90
+  -a "taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom \
+  --use_existing_db=1 --num=2000000 --value_size=1000 --cache_size=2147483648 \
+  --reads=3000000 --db=/root/bf2k/data/dbtest > /tmp/m1_victim.log 2>&1" -b 0-3 -t 120
 
-# m2 内存干扰（sysbench 3 线程流式读占核 1-3，与受害者 60s 并发）：
+# m2 内存干扰（sysbench 3 线程流式读占核 1-3，与受害者并发）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m2_memintf_run1.csv \
-  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/gups 20 60 > /tmp/m2_victim.log 2>&1 & \
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom \
+  --use_existing_db=1 --num=2000000 --value_size=1000 --cache_size=2147483648 \
+  --reads=3000000 --db=/root/bf2k/data/dbtest > /tmp/m2_victim.log 2>&1 & \
   taskset -c 1-3 sysbench memory --memory-block-size=1G --memory-scope=global \
   --memory-total-size=64G --memory-oper=read --memory-access-mode=seq --threads=3 \
-  --time=60 run > /tmp/m2_intf.log 2>&1 & wait'" -b 0-3 -t 90
+  --time=60 run > /tmp/m2_intf.log 2>&1 & wait'" -b 0-3 -t 120
 
 # m3 撤离（独立上下文重跑受害者，与 m1 同命令）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m3_withdraw_run1.csv \
-  -a "taskset -c 0 /root/bf2k/bench/bin/gups 20 60 > /tmp/m3_victim.log 2>&1" -b 0-3 -t 90
+  -a "taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom \
+  --use_existing_db=1 --num=2000000 --value_size=1000 --cache_size=2147483648 \
+  --reads=3000000 --db=/root/bf2k/data/dbtest > /tmp/m3_victim.log 2>&1" -b 0-3 -t 120
 
 # m4 繁忙传输（BF2 上跑受害者；fujian 上另开终端、窗口内起 60s 洪流穿越 p1）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m4_busytrans_run1.csv \
-  -a "taskset -c 0 /root/bf2k/bench/bin/gups 20 60 > /tmp/m4_victim.log 2>&1" -b 0-3 -t 90
+  -a "taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom \
+  --use_existing_db=1 --num=2000000 --value_size=1000 --cache_size=2147483648 \
+  --reads=3000000 --db=/root/bf2k/data/dbtest > /tmp/m4_victim.log 2>&1" -b 0-3 -t 120
 #   fujian（BF2 窗口启动后 5s 内）：netperf -H 10.99.99.3 -t TCP_STREAM -l 60
 #   前置：helong BF2 上 netserver -D -4 仍在跑、fujian 能 ping 通 10.99.99.3
 
 # m5 同核忙循环（纯用户态空转占同核，60s 后 timeout 自止）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m5_samecore_run1.csv \
-  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/gups 20 60 > /tmp/m5_victim.log 2>&1 & \
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom \
+  --use_existing_db=1 --num=2000000 --value_size=1000 --cache_size=2147483648 \
+  --reads=3000000 --db=/root/bf2k/data/dbtest > /tmp/m5_victim.log 2>&1 & \
   taskset -c 0 timeout 60 sh -c \"while true; do :; done\" > /dev/null 2>&1 & wait'" \
-  -b 0-3 -t 90
+  -b 0-3 -t 120
+
+# m6（可选）gups 决定性对照（受害者换 gups lg20，干扰者同 m2）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m6_gupsctl_run1.csv \
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/gups 20 60 > /tmp/m6_victim.log 2>&1 & \
+  taskset -c 1-3 sysbench memory --memory-block-size=1G --memory-scope=global \
+  --memory-total-size=64G --memory-oper=read --memory-access-mode=seq --threads=3 \
+  --time=60 run > /tmp/m6_intf.log 2>&1 & wait'" -b 0-3 -t 90
 ```
 
 回传（与批次 2 同包或单独）：
@@ -121,10 +165,11 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m5_samecore_run1.csv \
 tar czf /tmp/ch5_case7.tar.gz results/ch5_m*.csv results/ch5_m*.phase.log /tmp/m*_victim.log
 ```
 
-判读口径：受害者速率读 /tmp/m*_victim.log 的 `rate=` 行；计数器判读用
+判读口径：受害者速率 = db_bench 输出末行 `readrandom : ... micros/op; ... MB/s`，
+ops/s = 1e6/micros（跨轮比相对变化；gups 则读 `rate=` 行）；计数器判读用
 `python tools/prism_search.py results/ch5_mN_*.csv --scene mN`（与批次一相同流程）；
-m2/m5 的路径判别（内存流 vs 同核计算）是 PRISM 判别力的直接演示。任何一轮与期望
-不符 → docs/validation-replay.md §8.6 三类诊断，不阻塞叙事（负面结果同样入账）。
+m2 与 m5 的路径判别（内存流 vs 同核计算）是 PRISM 判别力的直接演示。任何一轮与
+期望不符 → docs/validation-replay.md §8.6 三类诊断，不阻塞叙事（负面结果同样入账）。
 
 ## 5. 与论文衔接
 
@@ -134,12 +179,16 @@ m2/m5 的路径判别（内存流 vs 同核计算）是 PRISM 判别力的直接
   无责、m5 双边界判别），仿 DPUSCOPE 表 1 做成"观测→主张→下一步证据"小表。
 - **相关工作**：DPUSCOPE 若已发表则补引；其"租户责任与机制归因分离"与我们的
   三层索引引擎（§4.6）互补——它做受控实验分离责任，PRISM 做计数器侧机制定位。
-- **成本**：5 轮 ≈ 10 分钟设备时间（可并入批次 2 同一上机时段）+ 判读 ~1 天。
+- **成本**：5+1 轮 ≈ 15-20 分钟设备时间（每轮含三步预热协议 ~2 分钟；可并入
+  批次 2 同一上机时段）+ 判读 ~1 天。
 
 ## 6. 待定/风险
 
-- 受害者选型：gups（已标定、自带速率、时长可控）为首选；若师兄希望"应用味"
-  更浓，可换 db_bench readrandom（c1e 配置）做受害者，干扰者与撤离设计不变。
-- m2 若速率降幅 <10%（BF2 内存余量大）：如实记录并换 rnd 模式或加线程复跑一轮。
+- 受害者已定 db_bench（内存驻留口径，见 §4.1 选型说明）；若师兄最终想要更决定性
+  的数字，启用 m6（gups 对照）。
+- m2 若速率降幅 <5%（BF2 内存余量大 / 受害者 DRAM 需求低）：如实记录并启用 m6；
+  或复跑时把干扰者换 rnd 模式。
+- db_bench 轮间速率漂移：以 m1/m3 同协议（drop_caches+双预热）控制温度；若 m1
+  与 m3 差 >5%，先查预热是否漏做（判读流程同 c1e 的页缓存排查）。
 - m4 依赖 helong netserver 存活；若 10.99.99.3 不通，退回 c2b 姿势（BF2→fujian
   出向，Arm 参与度高，预期要改）。
