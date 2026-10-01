@@ -53,3 +53,7 @@ results/
 ch5_b1.tar.gz
 netperf_2.7.0-0.1_arm64.deb
 __pycache__/
+
+# Reference materials kept local only (labmate's anonymous-submission excerpt)
+fig/example.jpg
+docs/dpuscope-excerpt-ocr.txt
