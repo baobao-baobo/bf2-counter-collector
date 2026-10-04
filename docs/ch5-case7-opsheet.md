@@ -191,6 +191,13 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_m6_gupsctl_run1.csv \
 任何一轮与期望不符 → docs/validation-replay.md §8.6 三类诊断（A 预期设错 /
 B 引擎缺陷 / C 数据问题），不阻塞叙事（负面结果同样入账）。
 
+> **2026-10-04 实测对照（结案，详情 docs/case7-results.md）**：m1 110.3K 基线；
+> m2 97.5K（−11.6% ✓，干扰者 8.32GB/s×7.7s 吃完 64GiB 预算）；m3 109.7K
+> （−0.5% ✓）；m4 108.0K（−2.1% ✓，洪流 6.30Gbps×60.01s 在窗口内，计数器
+> wire/pf1hpf/pcie0 顶点盖章）；m5 56.2K（−49.0% ✓，**但 cr 腰斩 0.365→0.178
+> 而非"a72/cr 高"→ A 类预期修订**：纯计算干扰对计数器不可见，引擎判 low，
+> 论证力反而更强）。m6 未启用。
+
 ---
 
 ## 9. 回传
