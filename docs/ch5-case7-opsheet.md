@@ -21,8 +21,9 @@
 
 ```bash
 # 0.1 三工具与数据在位
-ls /root/bf2k/bench/bin/ | grep -E '^(db_bench|sysbench|gups)$'   # 三个都输出 = OK
-ls /root/bf2k/data/dbtest | wc -l                                 # 508 = 库完好
+ls /root/bf2k/bench/bin/ | grep -E '^(db_bench|gups)$'      # 两个自编译二进制 = OK
+which sysbench && sysbench --version                       # sysbench 是 dpkg 系统包（在 /usr/bin），出路径+版本 = OK
+ls /root/bf2k/data/dbtest | wc -l                          # 508 左右（LOG 随开库增长，509 正常）= 库完好
 # 0.2 资源（m2 一轮峰值：2GB 块缓存 + 3GB 干扰者 + 系统）
 df -h /root/bf2k/data                                              # 可用 ≥30G
 free -h                                                           # available ≥6G
