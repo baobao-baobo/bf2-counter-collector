@@ -6,14 +6,14 @@
 
 **案例一览**（对应 PathFinder 第五章骨架）：
 
-| Case | 主题 | 轮次 | 转移演示 |
-|---|---|---|---|
-| 1 | 新应用路径分类 | c1a–c1f（6 轮） | 六应用六种路径签名 |
-| 2 | 方向翻转 | c2b、c2c（c2a 复用 c1d） | nad↔出向↔tx（p1） |
-| 3 | 工作集转移 | c3a–c3e（5 轮） | 缓存驻留↔DRAM↔存储 |
-| 4 | 访问模式转移 | c4a–c4e（5 轮） | seq↔rnd、rd↔wr、顺序灌↔随机灌 |
-| 5 | 并发争用与份额 | c5a、c5b（2 轮） | 4 实例异参数同跑 + 份额分解 |
-| 6 | 机制切换 | c6a–c6d（4 轮） | TCP↔UDP、页缓存↔O_DIRECT |
+| Case | 主题      | 轮次                  | 转移演示                  |
+| ---- | ------- | ------------------- | --------------------- |
+| 1    | 新应用路径分类 | c1a–c1f（6 轮）        | 六应用六种路径签名             |
+| 2    | 方向翻转    | c2b、c2c（c2a 复用 c1d） | nad↔出向↔tx（p1）         |
+| 3    | 工作集转移   | c3a–c3e（5 轮）        | 缓存驻留↔DRAM↔存储          |
+| 4    | 访问模式转移  | c4a–c4e（5 轮）        | seq↔rnd、rd↔wr、顺序灌↔随机灌 |
+| 5    | 并发争用与份额 | c5a、c5b（2 轮）        | 4 实例异参数同跑 + 份额分解      |
+| 6    | 机制切换    | c6a–c6d（4 轮）        | TCP↔UDP、页缓存↔O_DIRECT  |
 
 执行按四批次推进，每批回传判读后再进下一批。
 
@@ -32,6 +32,7 @@ pf0hpf / pf1hpf / p1 / Arm 代表口均 ACTIVE（RoCE 链路层就绪，应用�
 eMMC 挂载点（本轮统一 `/root/bf2k/data/`，前提：根文件系统在 eMMC 上，待补查）。
 
 **补查（贴回）**：
+
 ```bash
 lsblk                    # 找 eMMC 设备与挂载点
 df -h / /root            # eMMC 分区可用空间（需 ≥10GB：DB 2GB×2.5 + sysbench 4G）
@@ -43,12 +44,15 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
 `scp` 到 BF2 的 `/tmp/`，再在 BF2 上构建。
 
 - **0.2.0 挑包通用方法（ports.ubuntu.com 目录已失效，改国内镜像站，fujian 上 curl 可列表）**
-
+  
   先确认系统版本（贴回）：
+  
   ```bash
   cat /etc/os-release | head -3; uname -m    # 预期 Ubuntu 20.04 (focal) aarch64
   ```
+  
   fujian 上列目录（tuna 首选，不通换 ustc/aliyun）：
+  
   ```bash
   M=https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/pool
   curl -s $M/universe/s/sysbench/  | grep -o 'sysbench_[^"]*arm64\.deb' | sort -u
@@ -58,6 +62,7 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   # 不通时换：M=https://mirrors.ustc.edu.cn/ubuntu-ports/pool
   #          M=https://mirrors.aliyun.com/ubuntu-ports/pool
   ```
+  
   **关键陷阱**：pool 目录跨 Ubuntu 版本共享（focal/jammy/noble 的文件都在），
   必须挑与 os-release 匹配的版本——focal 对应 sysbench `1.0.18+dfsg`、
   netperf `2.7.0+git20191211`、gfortran-9 `9.4.0-1ubuntu1~20.04`。挑错版本
@@ -71,35 +76,41 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   2.31），focal 只到 `+dfsg-6`。通则：focal 包不会要求 libc6>2.31，拿不准时先
   `dpkg-deb -f x.deb Depends` 验明正身再装。另注意 luajit 在 **universe** 池
   （sysbench 同源），不在 main。
-
+  
   **已确认文件名（9/22 tuna 目录实查，按 focal 选；URL 里 `+` 要写 `%2B`）**：
-  | 包 | 文件名 | 备注 |
-  |---|---|---|
-  | netperf（arm64，BF2+helong 各一份） | `netperf_2.7.0-0.1_arm64.deb` | 报错则换同目录 `netperf_2.6.0-2.1_arm64.deb`（bionic 版必兼容） |
-  | sysbench（arm64） | `sysbench_1.0.18+ds-1_arm64.deb` | 弃 1.0.20+ds-9（noble）；补链三包见下 |
-  | libluajit-5.1-2（arm64） | `libluajit-5.1-2_2.1.0~beta3+dfsg-6_arm64.deb` | universe 池；6ubuntu0.1=jammy 勿选 |
-  | libluajit-5.1-common（all） | `libluajit-5.1-common_2.1.0~beta3+dfsg-6_all.deb` | 与 -2 精确同版（= 咬合） |
-  | libpq5（arm64） | `libpq5_12.22-0ubuntu0.20.04.4_arm64.deb` | sysbench pg 驱动；12.16 不存在 |
-  | gfortran-9（arm64） | `gfortran-9_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 同目录再拿 libgfortran-9-dev 同版本 |
-  | libgfortran-9-dev（arm64） | `libgfortran-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 缺 libgfortran5 时报错贴回（libquadmath0 对 arm64 不存在，勿找） |
-  | sockperf（arm64） | `sockperf_3.6-2build1_arm64.deb` | 试装；报 glibc 错→跳过（c6 回退已备） |
+  
+  | 包                             | 文件名                                                  | 备注                                                 |
+  | ----------------------------- | ---------------------------------------------------- | -------------------------------------------------- |
+  | netperf（arm64，BF2+helong 各一份） | `netperf_2.7.0-0.1_arm64.deb`                        | 报错则换同目录 `netperf_2.6.0-2.1_arm64.deb`（bionic 版必兼容） |
+  | sysbench（arm64）               | `sysbench_1.0.18+ds-1_arm64.deb`                     | 弃 1.0.20+ds-9（noble）；补链三包见下                        |
+  | libluajit-5.1-2（arm64）        | `libluajit-5.1-2_2.1.0~beta3+dfsg-6_arm64.deb`       | universe 池；6ubuntu0.1=jammy 勿选                     |
+  | libluajit-5.1-common（all）     | `libluajit-5.1-common_2.1.0~beta3+dfsg-6_all.deb`    | 与 -2 精确同版（= 咬合）                                    |
+  | libpq5（arm64）                 | `libpq5_12.22-0ubuntu0.20.04.4_arm64.deb`            | sysbench pg 驱动；12.16 不存在                           |
+  | gfortran-9（arm64）             | `gfortran-9_9.4.0-1ubuntu1~20.04.3_arm64.deb`        | 同目录再拿 libgfortran-9-dev 同版本                        |
+  | libgfortran-9-dev（arm64）      | `libgfortran-9-dev_9.4.0-1ubuntu1~20.04.3_arm64.deb` | 缺 libgfortran5 时报错贴回（libquadmath0 对 arm64 不存在，勿找）  |
+  | sockperf（arm64）               | `sockperf_3.6-2build1_arm64.deb`                     | 试装；报 glibc 错→跳过（c6 回退已备）                           |
 
 - **0.2.1 netperf（deb，fujian 一份 x86 + BF2 一份 arm64 + helong BF2 一份 arm64）**
+  
   - fujian 端（跑 netserver 用）：`apt install -y netperf`
   - arm64 包：按 0.2.0 从 `multiverse/n/netperf/` 挑 focal 版本下载；BF2 上
     `dpkg -i`；缺依赖同池补装、报错贴回。
   - 装后验证：`netperf -V`、`netserver -V` 各出一行版本。
+
 - **0.2.2 sysbench（arm64 deb）**：按 0.2.0 从 `universe/s/sysbench/` 挑 focal
   版本（1.0.18）；`dpkg -i`；缺依赖同池补装（libaio1 设备已有）。验证：
   `sysbench --version`。
+
 - **0.2.3 sockperf（arm64 deb）**：按 0.2.0 从 `universe/s/sockperf/` 检查；
   有 focal 版本则装，只有 jammy+ 版本则跳过（按 0.2.0 回退）。验证：
   `sockperf --version`。
+
 - **0.2.4 LevelDB db_bench（源码 cmake）——9/22 实测通过，submodule 坑已钉死**
   GitHub release tarball **不含 submodule 内容**：third_party/googletest 与
   third_party/benchmark 解出来是空目录。而 db_bench 链接 gmock/gtest，这两个库
   目标只在 `-DLEVELDB_BUILD_TESTS=ON` 时被创建；TESTS=ON 又触发 CMakeLists.txt:304
   `add_subdirectory(third_party/benchmark)` → 两个 submodule 都得补。全套命令：
+  
   ```bash
   # fujian 下载三个包（~/bbbb/app）后 scp 到 BF2 /tmp：
   #   wget https://github.com/google/leveldb/archive/refs/tags/1.23.tar.gz
@@ -122,12 +133,15 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   /root/bf2k/bench/bin/db_bench --benchmarks=fillseq --num=1000 --value_size=100
   # 验收 = 首行 "LevelDB:    version 1.23"；--version 旗标 1.23 已移除（报 Invalid flag）
   ```
+  
   踩坑记录：①改 CMakeLists.txt 后必须重跑 cmake（make 只触发
   cmake_check_build_system，不重新生成）；②configure 阶段 `HAVE_CXX_FLAG_*`
   探针报 Failed（WSHORTEN_64_TO_32 / WD654 / WTHREAD_SAFETY /
   GNU_POSIX_REGEX）是 google benchmark 的特性探测——那些是 Clang 旗标，gcc
   不支持属预期，取回退路径，对功能/性能零影响。
+
 - **0.2.5 lmbench3（源码 make）——9/22 实测一把过**
+  
   ```bash
   # fujian：wget https://sourceforge.net/projects/lmbench/files/development/lmbench-3.0-a9/lmbench-3.0-a9.tgz/download -O lmbench.tgz
   # scp lmbench.tgz 到 BF2 /tmp，然后（设备上执行）：
@@ -137,7 +151,9 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   /root/bf2k/bench/bin/lat_mem_rd 16      # 冒烟：出一行 stride 延迟（ns）
   /root/bf2k/bench/bin/bw_mem 1M rd       # 冒烟：出 1MB 读带宽（MB/s）
   ```
+  
   实测记录：aarch64 探测与 rpc 编译均无碍（预判的两个坑都未触发）。
+
 - **gfortran 安装（0.1 已确认缺失，NPB 的 EP/MG/CG/FT 必需）**：
   **9/22 已实测通过**。路线结论（踩坑定案）：①gfortran-10 不存在——focal 从未
   发布 gcc-10 编译器本体（gcc-10 源包只构建运行时库；libquadmath0 对 arm64 不
@@ -146,6 +162,7 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   =双链同升：gcc-9 全家 .1→.3（含 libasan5）+ gcc-10 运行时全家 10.3.0→10.5.0。
   18 个 deb 全部 focal 原生版本（libhwasan0 设备未装故不在列；若 `dpkg -l` 见
   10.3.0 的它则补同版 10.5.0），fujian 下好 scp 后**一条命令全装**：
+  
   ```bash
   dpkg -i \
     gcc-9-base_9.4.0-1ubuntu1~20.04.3_arm64.deb cpp-9_9.4.0-1ubuntu1~20.04.3_arm64.deb \
@@ -161,10 +178,13 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   dpkg --configure -a
   gfortran-9 --version      # 应报 9.4.0；NPB 用 gfortran-9 编译（见 0.2.6）
   ```
+  
   分步装会报依赖挂起（9/22 实测：先 7 包后补 12 包收尾亦可，同一终态）；缺包
   报错贴回。**回退方案**（仍装不上）：NPB 只编 IS（C 内核），EP 诚实负例改
   `sysbench cpu --cpu-max-prime=20000`，MG/CG/FT 三场暂缓。
+
 - **0.2.6 NPB 3.4.3（源码 make，五内核）**
+  
   ```bash
   # fujian：wget https://www.nas.nasa.gov/assets/npb/NPB3.4.3.tar.gz
   #   （若 403/超时，搜索 "NPB3.4.3.tar.gz" 任一镜像下载）
@@ -176,11 +196,13 @@ fujian 有外网，负责下载；BF2 无外网。除特别注明外：fujian �
   for k in ep is mg cg ft; do for c in S A B; do make $k CLASS=$c; done; done
   cp bin/*.x /root/bf2k/bench/bin/     # ep.S.x ep.A.x ... ft.B.x
   ```
+
 - **0.2.7 GUPS（自写 ~60 行 C，设备上直接写入，不走 git）——v2 计时修复版**
   踩坑定案（9/23）：v1 用 `clock()`（进程 CPU 时间）——aarch64 vDSO 只提供墙钟
   类时钟（REALTIME/MONOTONIC 等），进程 CPU 时间必须走系统调用，每次迭代查一次
   ≈700–900ns，计时开销主导速率（lg=15/18/20 全 ~0.001 GUP/s 阶梯消失）。v2 改
   `CLOCK_MONOTONIC`（vDSO ~20ns）+ 每 1024 次更新查一次时间：
+  
   ```bash
   mkdir -p /root/bf2k/bench/src
   cat > /root/bf2k/bench/src/gups.c <<'EOF'
@@ -246,13 +268,13 @@ NPB 3.4 无 SER，OMP 四线程替代单线程 SER，信号对齐多线程饱和
 
 实测（Time in seconds / real）：
 
-| 内核 | S | A | B | C |
-|---|---|---|---|---|
-| EP | — | 4.98 / 5.0s | **20.00 / 20.0s** | — |
-| IS | — | 0.46 / 1.0s | — | **9.82 / 19.5s** |
-| FT | — | 2.66 / 3.2s | **38.89 / 41.6s** | — |
-| MG | 0.00 / 0.01s | 2.08 / 3.1s | **9.72 / 10.7s（循环×2）** | — |
-| CG | — | **2.34 / 2.7s（循环×10）** | — | — |
+| 内核  | S            | A                      | B                      | C                |
+| --- | ------------ | ---------------------- | ---------------------- | ---------------- |
+| EP  | —            | 4.98 / 5.0s            | **20.00 / 20.0s**      | —                |
+| IS  | —            | 0.46 / 1.0s            | —                      | **9.82 / 19.5s** |
+| FT  | —            | 2.66 / 3.2s            | **38.89 / 41.6s**      | —                |
+| MG  | 0.00 / 0.01s | 2.08 / 3.1s            | **9.72 / 10.7s（循环×2）** | —                |
+| CG  | —            | **2.34 / 2.7s（循环×10）** | —                      | —                |
 
 定档：EP=B 单发；IS=C 单发（real 19.5s 含 ~10s 初始化分配，窗口按 real 计）；
 FT=B 单发；MG=B 循环×2；CG=A 循环×10。全部 Verification SUCCESSFUL。
@@ -316,6 +338,7 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c1f_sbrndwr_run1.csv \
 ```
 
 **清缓存**（每次跑 eMMC 相关轮次前执行，防止页缓存把"存储访问"变成"内存命中"）：
+
 ```bash
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 ```
@@ -338,16 +361,16 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c2c_tx_run1.csv \
 
 ### 批次 1 判读标准（Claude 本地）
 
-| 轮 | 期望判决 | 期望签名 | 不一致处置 |
-|---|---|---|---|
-| c1a EP | low | 七路径全 ≈0（openssl 同族负例） | 按 docs/validation-replay.md §8.6 三类诊断 |
-| c1b IS | dominant cr | a72/hnf 抬升；wb 中度（排序阶段） | 同上 |
-| c1c FT | dominant cr | a72 流式 + wb（转置写）；ib 可见 | 同上 |
-| c1d=2a | dominant nad | en3f1_rx 抬升；其余路径残值（E2E-B/D2 同族） | 同上 |
-| c1e | dominant ib/ih（io 域） | io_reads 抬升、a72 轻微（miss 读不重算）；与 c3e 对照用 | 同上 |
-| c1f | dominant cr 或 wb | a72 写+io 读（eMMC DMA 读缓存区）+eMMC 随机写 | 同上 |
-| c2b | dominant ih（E2 armsend 签名） | ih 1.0 量级+nad 近平局；tx≈0（不经 p1） | 同上 |
-| c2c | tx 点亮（9/30 主机口径修订） | p1_tx 抬升（tx 路径首证）；nad 不随行（主机→网络 HW 转发、Arm 不参与）；与 c2b 对照 | 同上 |
+| 轮      | 期望判决                       | 期望签名                                                    | 不一致处置                                 |
+| ------ | -------------------------- | ------------------------------------------------------- | ------------------------------------- |
+| c1a EP | low                        | 七路径全 ≈0（openssl 同族负例）                                   | 按 docs/validation-replay.md §8.6 三类诊断 |
+| c1b IS | dominant cr                | a72/hnf 抬升；wb 中度（排序阶段）                                  | 同上                                    |
+| c1c FT | dominant cr                | a72 流式 + wb（转置写）；ib 可见                                  | 同上                                    |
+| c1d=2a | dominant nad               | en3f1_rx 抬升；其余路径残值（E2E-B/D2 同族）                         | 同上                                    |
+| c1e    | dominant ib/ih（io 域）       | io_reads 抬升、a72 轻微（miss 读不重算）；与 c3e 对照用                 | 同上                                    |
+| c1f    | dominant cr 或 wb           | a72 写+io 读（eMMC DMA 读缓存区）+eMMC 随机写                      | 同上                                    |
+| c2b    | dominant ih（E2 armsend 签名） | ih 1.0 量级+nad 近平局；tx≈0（不经 p1）                           | 同上                                    |
+| c2c    | tx 点亮（9/30 主机口径修订）         | p1_tx 抬升（tx 路径首证）；nad 不随行（主机→网络 HW 转发、Arm 不参与）；与 c2b 对照 | 同上                                    |
 
 ### 回传（批次 1）
 
@@ -374,7 +397,7 @@ tar czf /tmp/ch5_b1.tar.gz results/ch5_c1*.csv results/ch5_c1*.phase.log \
 ```bash
 which timeout          # ✓ /usr/bin/timeout，时长预算循环可用
 /root/bf2k/bench/bin/lat_mem_rd 1 64     # ✓ 表头至 1.00000MB（参数语义确认：首参=区段
-                                         #   MB 上限、次参=步长×64B=4KB）；1MB 档 8.5ns
+         c                                #   MB 上限、次参=步长×64B=4KB）；1MB 档 8.5ns
 /root/bf2k/bench/bin/lat_mem_rd 256 64   # ✓ 表头至 256.00000MB；256MB 档 14.7ns
 df -h /root/bf2k/data   # ✓ 36G 可用（59G 盘已用 20G；c4d/c4e 新增 ~2.5GB 绰绰有余）
 ```
@@ -429,19 +452,24 @@ Case 4：
 
 ```bash
 # c4a 顺序读内存（1GB 缓冲、流式 → cr 流式，bypass 或可见）：
+# 10/05 修订：total-size 64G→512G（Case 7 m2 实测 3 线程 8.32GB/s，64G 约 8s 吃完、
+# time=30 不生效）；补 taskset -c 0-3（4-7 常驻 mlnx_snap_emu，且计数器只采 0-3）
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4a_memseq_run1.csv \
-  -a "sysbench memory --memory-block-size=1G --memory-scope=global --memory-total-size=64G \
-  --memory-oper=read --memory-access-mode=seq --threads=4 --time=30 run" -b 0-3 -t 60
+  -a "taskset -c 0-3 sysbench memory --memory-block-size=1G --memory-scope=global \
+  --memory-total-size=512G --memory-oper=read --memory-access-mode=seq \
+  --threads=4 --time=30 run" -b 0-3 -t 60
 
 # c4b 随机读内存（同一 1GB 缓冲内随机 → cr miss 主导；与 c4a 仅换 access-mode）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4b_memrnd_run1.csv \
-  -a "sysbench memory --memory-block-size=1G --memory-scope=global --memory-total-size=64G \
-  --memory-oper=read --memory-access-mode=rnd --threads=4 --time=30 run" -b 0-3 -t 60
+  -a "taskset -c 0-3 sysbench memory --memory-block-size=1G --memory-scope=global \
+  --memory-total-size=512G --memory-oper=read --memory-access-mode=rnd \
+  --threads=4 --time=30 run" -b 0-3 -t 60
 
 # c4c 顺序写内存（→ wb 主导；与 c4a 仅换 oper）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4c_memwr_run1.csv \
-  -a "sysbench memory --memory-block-size=1G --memory-scope=global --memory-total-size=64G \
-  --memory-oper=write --memory-access-mode=seq --threads=4 --time=30 run" -b 0-3 -t 60
+  -a "taskset -c 0-3 sysbench memory --memory-block-size=1G --memory-scope=global \
+  --memory-total-size=512G --memory-oper=write --memory-access-mode=seq \
+  --threads=4 --time=30 run" -b 0-3 -t 60
 
 # c4d 顺序灌库（顺序写 2GB → wb 主导 + 顺序 eMMC 写）：
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
@@ -458,18 +486,18 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4e_fillrnd_run1.csv \
 
 ### 批次 2 判读标准
 
-| 轮 | 期望判决 | 期望签名 | 不一致处置 |
-|---|---|---|---|
-| c3a | cr 低（对比参照） | a72/victim 低于 c3b（工作集近 L2）；时长预算循环的 exec 开销垫高 a72 基线 ~2× 属预期，对比以 victim/wb 为主 | 三类诊断 |
-| c3b | dominant cr（对比 c3a 明显抬升） | a72 高、victim/wb 中度 | 同上 |
-| c3c | cr 低 | 指针链 1MB 实测 8.5ns，几乎不出 L2（对照 c3d 的 14.7ns） | 同上 |
-| c3d | dominant cr（对比 c3c 明显抬升） | 256MB 链实测 14.7ns/跳 ≈ 单核 68M 跳/s ≈ 4GB/s DRAM 读（9/30 实测上调自"温和"）；指针追逐仍是"深度"型负载（依赖链不可流水），cr 绝对值或低于同带宽顺序流 | 同上 |
-| c3e | dominant cr（与 c1e 阈值翻转） | a72 高、io 低（页缓存清后全命中内存）；c1e↔c3e 一对 = 存储↔内存翻转 | 若仍判 ib 先查页缓存是否未清（重跑前必须 drop_caches） |
-| c4a | dominant cr（流式） | a72 高、bypass 可见 | 三类诊断 |
-| c4b | dominant cr（miss 主导） | a72 高 + victim/wb 高于 c4a（随机逐出） | 同上 |
-| c4c | dominant cr 或 wb | a72 写侧 + wb 抬升（对照 c4a 读） | 同上 |
-| c4d | wb 主导 | a72 写 + io 写（顺序 eMMC）；与 c4e 对照 | 同上 |
-| c4e | wb 主导 + io 更高 | 随机 eMMC 写 io 高于 c4d（顺序） | 同上 |
+| 轮   | 期望判决                     | 期望签名                                                                                                  | 不一致处置                               |
+| --- | ------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| c3a | cr 低（对比参照）               | a72/victim 低于 c3b（工作集近 L2）；时长预算循环的 exec 开销垫高 a72 基线 ~2× 属预期，对比以 victim/wb 为主                          | 三类诊断                                |
+| c3b | dominant cr（对比 c3a 明显抬升） | a72 高、victim/wb 中度                                                                                    | 同上                                  |
+| c3c | cr 低                     | 指针链 1MB 实测 8.5ns，几乎不出 L2（对照 c3d 的 14.7ns）                                                             | 同上                                  |
+| c3d | dominant cr（对比 c3c 明显抬升） | 256MB 链实测 14.7ns/跳 ≈ 单核 68M 跳/s ≈ 4GB/s DRAM 读（9/30 实测上调自"温和"）；指针追逐仍是"深度"型负载（依赖链不可流水），cr 绝对值或低于同带宽顺序流 | 同上                                  |
+| c3e | dominant cr（与 c1e 阈值翻转）  | a72 高、io 低（页缓存清后全命中内存）；c1e↔c3e 一对 = 存储↔内存翻转                                                           | 若仍判 ib 先查页缓存是否未清（重跑前必须 drop_caches） |
+| c4a | dominant cr（流式）          | a72 高、bypass 可见                                                                                       | 三类诊断                                |
+| c4b | dominant cr（miss 主导）     | a72 高 + victim/wb 高于 c4a（随机逐出）                                                                        | 同上                                  |
+| c4c | dominant cr 或 wb         | a72 写侧 + wb 抬升（对照 c4a 读）                                                                              | 同上                                  |
+| c4d | wb 主导                    | a72 写 + io 写（顺序 eMMC）；与 c4e 对照                                                                        | 同上                                  |
+| c4e | wb 主导 + io 更高            | 随机 eMMC 写 io 高于 c4d（顺序）                                                                               | 同上                                  |
 
 ### 回传（批次 2）
 
@@ -543,14 +571,14 @@ c6a 复用 c2b（netperf TCP_STREAM 出向）、c6b 改 `netperf -H 192.168.56.1
 
 ### 批次 3 判读标准
 
-| 轮 | 期望判决 | 期望签名 | 不一致处置 |
-|---|---|---|---|
-| c5a | dominant ib/ih 或 multi | 四实例聚合 io+cr 双高；**附加对照**：/tmp/db{16,64,256,1g}.log 四份 ops/s 与聚合带宽的份额关系（PathFinder 式吞吐↔带宽对照） | 三类诊断 |
-| c5b | dominant cr/wb | a72+victim 高（随机读改写）；四实例 GUP/s 日志对照 | 同上 |
-| c6a | dominant ih（E2 签名） | nad 近平局；pps 记录（sockperf 输出） | 同上 |
-| c6b | dominant ih（E2 签名） | 与 c6a 对照：pps 更高、核域略升（UDP 无流控） | 同上 |
-| c6c | cr 中度 + ib | buffered：缺页读+拷贝（a72 可见） | 同上 |
-| c6d | dominant ib（cr 分量消失） | 与 c6c 对照：a72 明显下降、io 持平 | 同上 |
+| 轮   | 期望判决                   | 期望签名                                                                                       | 不一致处置 |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------ | ----- |
+| c5a | dominant ib/ih 或 multi | 四实例聚合 io+cr 双高；**附加对照**：/tmp/db{16,64,256,1g}.log 四份 ops/s 与聚合带宽的份额关系（PathFinder 式吞吐↔带宽对照） | 三类诊断  |
+| c5b | dominant cr/wb         | a72+victim 高（随机读改写）；四实例 GUP/s 日志对照                                                         | 同上    |
+| c6a | dominant ih（E2 签名）     | nad 近平局；pps 记录（sockperf 输出）                                                                | 同上    |
+| c6b | dominant ih（E2 签名）     | 与 c6a 对照：pps 更高、核域略升（UDP 无流控）                                                              | 同上    |
+| c6c | cr 中度 + ib             | buffered：缺页读+拷贝（a72 可见）                                                                    | 同上    |
+| c6d | dominant ib（cr 分量消失）   | 与 c6c 对照：a72 明显下降、io 持平                                                                    | 同上    |
 
 ### 回传（批次 3）
 
@@ -576,18 +604,18 @@ tar czf /tmp/ch5_b3.tar.gz results/ch5_c5*.csv results/ch5_c5*.phase.log \
 
 ## 记录表（判读后回填）
 
-| 轮 | CSV | 窗长 | 判决 | L_p 均值 (cr/ih/ib/wb/nad/nhd/tx) | 预期 | 结论 |
-|---|---|---|---|---|---|---|
-| c1a | ch5_c1a_ep_run1.csv | 应用 21s + 空载尾 284s | dominant cr (med 0.535) | 0.535/0.191/0.416/0.003/0/0/0 | low | **预期设错（A 类）**：EP 非纯计算，持续 13.5M/s a72_access、4.4M/s mem_reads、1.78M/s 旁路读 → 修订预期 dominant cr 弱档；ib=0.416 为真实旁路读（bypass 非 I/O 专属再证）；cr 排序 EP 0.535<IS 0.754<FT 1.879 支持判别力 |
-| c1b | ch5_c1b_is_run1.csv | 应用 20s + 尾 280s | dominant cr (0.754) | 0.754/0.304/0.224/0.050/0/0/0 | dominant cr | PASS；wb 未现"中度"（0.050），同 c1c 注，不阻塞 |
-| c1c | ch5_c1c_ft_run1.csv | 应用 42s + 尾 268s | dominant cr (1.879) | 1.879/0.706/0.866/0.025/0/0/0 | dominant cr；ib 可见 | PASS；ib=0.866"可见"实证 ✓（FT 流式读旁路）；wb 转置写未显著（两轮 NPB 同现象，待 Part 6 标定替换后复核） |
-| c1d | ch5_c1d_netin_run1.csv | 应用 30s + 尾 40s | dominant nad (1.882) | 0.839/1.225/0.590/0.010/1.882/0.063/0 | dominant nad；en3f1_rx 抬升 | PASS；ih=1.225 即 en3f1_rx io 域抬升，符合预期 |
-| c1e | ch5_c1e_dbmiss_run1.csv + run2 | 应用 67s/69s | low (ih 0.069/0.068) | 0.061/0.068/0.026/0.001/0/0/0 | dominant ib/ih | **预期设错（A 类）定案**：run2（drop_caches 内联）与 run1 计数逐列一致（io_write 0.0932 vs 0.0921）→ run1 本就冷读、页缓存假说排除；**纯读负载点亮 io_write（0.092M/s=115×空载）而 io_reads 恒死** → eMMC 读方向记入 IO_Write（设备视角）；量级 ~8MB/s vs DMA 锚点 Gbps 级差 3 个数量级 → 判 low 如实。预期修订 low；**方向语义新发现入论文素材**（0x73/0x74 设备视角交叉实证） |
-| c1f | ch5_c1f_sbrndwr_run1.csv | 应用 31s + 尾 34s | low (cr 0.064) | 0.064/0.040/0.032/0.001/0/0/0 | dominant cr 或 wb | **预期设错（A 类）定案**：eMMC 随机写仅 ~4.5MB/s（io_reads 0.071M/s×64B），a72/mem 域 6–9× 抬升但绝对值小 → 判 low 如实；**纯写负载点亮 io_reads（140×）**=方向交叉实证的另一半（与 c1e 互证 0x73/0x74 设备视角）；预期修订 low |
-| c2b | ch5_c2b_netout_run2.csv | 应用 30s | dominant nad (1.566) | 0.493/1.067/0.316/0.003/1.566/0.667/0.011 | dominant ih（E2 armsend 签名） | **准 PASS（预期微调）**：流量真实（en3f1_rx=pf1hpf_tx 1416M/s≈11.3Gbps 1:1、ACK 回程 2.8M/s）；ih+nad 双亮签名复现（ih 1.067 与 E2 1.000 同量级），但 arm 顶点饱和（n=0.967 打满 6.6Gbps cap 锚点、SAT-SUSPECT 如实）后份额路由给 nad → 头名 ih→nad 漂移；与 E2"近平局、缺口=主机写入侧"边界标注一致；tx≈0 ✓、p1 未用 ✓ |
-| c2c | ch5_c2c_tx_run1.csv（旧失败文件复打包） | 应用 1s | — | — | tx 点亮 | **仍未重跑**（新包时间戳与旧轮逐字节一致）；helong netserver 检查后跑 run2 |
-| c2c | ch5_c2c_tx_run2.csv | 应用 31s | low（tx 0.001） | 0.045/0.017/0.022/0.001/0/0.004/0.001 | tx 点亮 | **姿势错误（C 类）+ 配置事实发现**：netperf 连上 helong 跑满 30s、p1_tx 13M/s（~104Mbps）+ACK 0.28M/s 回程=流量真实，但 **en3f1_rx=0.0000（Arm 数据口分文未动）**；pcie1_tx 15.3M/s≈pcie0_rx 15.3M/s 全程 1:1 对账 → Arm 数据走 pcie1 出主机、fujian 主机软件转发投回 BF2（pf1hpf_rx 13M/s→p1 出线）=**主机折返**；**主 BF2 的 Arm 与 p1 无二层直连**（§5.6 ping 通一直是折返路，掩盖至今）；速率卡 ~104Mbps（折返瓶颈）；引擎 tx=0.001 如实（13M/s÷12.5GB/s 线速锚点=0.001）；**pcie0_tx 53M/s（≈4×线速）记账未解留待考**。改主机口径重跑（tx=主机→网络的本来定义） |
-| c2c | ch5_c2c_host_run1.csv（主机口径 run3） | 应用 56s（流 30s，28s 在窗内） | low（tx 0.027，leader nhd 0.048） | 0.002/0.000/0.010/0.000/0.010/0.048/0.027 | tx 点亮（nad 删） | **实质 PASS（预期修订 A 类）**：netperf 跑满 30s ~5.5Gbps 稳态、三层一致（pcie0_rx 683M/s≈pcie1_tx 685M/s≈p1_tx 5s 均值 712M/s）→ **p1_tx 抬升=tx 路径首证 ✓**；**Arm 分文未动**（pcie1_rx 2.5M/s 平、tile 近空载、SF 列全零）→ eSwitch HW 转发正常、nad 不随行=主机口径设计意图，预期删 nad；速率卡 ~5.5Gbps≈helong Arm netserver 收包平台（~6Gbps 估计）；netdev 计数 5s 锯齿=统计上报伪影（5s 合计与 TLR 稳态口径一致）；**pcie1_tx 计入主机→ASIC 穿透 TLP**（E0-1/c2b 交叉实证；与 pcie0_tx 53M/s 同列账目待考）；流前 3s 落 pre-idle（启动时序偏斜，不影响判定） |
+| 轮   | CSV                              | 窗长                    | 判决                             | L_p 均值 (cr/ih/ib/wb/nad/nhd/tx)           | 预期                         | 结论                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | -------------------------------- | --------------------- | ------------------------------ | ----------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| c1a | ch5_c1a_ep_run1.csv              | 应用 21s + 空载尾 284s     | dominant cr (med 0.535)        | 0.535/0.191/0.416/0.003/0/0/0             | low                        | **预期设错（A 类）**：EP 非纯计算，持续 13.5M/s a72_access、4.4M/s mem_reads、1.78M/s 旁路读 → 修订预期 dominant cr 弱档；ib=0.416 为真实旁路读（bypass 非 I/O 专属再证）；cr 排序 EP 0.535<IS 0.754<FT 1.879 支持判别力                                                                                                                                                                                                                                                    |
+| c1b | ch5_c1b_is_run1.csv              | 应用 20s + 尾 280s       | dominant cr (0.754)            | 0.754/0.304/0.224/0.050/0/0/0             | dominant cr                | PASS；wb 未现"中度"（0.050），同 c1c 注，不阻塞                                                                                                                                                                                                                                                                                                                                                                                           |
+| c1c | ch5_c1c_ft_run1.csv              | 应用 42s + 尾 268s       | dominant cr (1.879)            | 1.879/0.706/0.866/0.025/0/0/0             | dominant cr；ib 可见          | PASS；ib=0.866"可见"实证 ✓（FT 流式读旁路）；wb 转置写未显著（两轮 NPB 同现象，待 Part 6 标定替换后复核）                                                                                                                                                                                                                                                                                                                                                      |
+| c1d | ch5_c1d_netin_run1.csv           | 应用 30s + 尾 40s        | dominant nad (1.882)           | 0.839/1.225/0.590/0.010/1.882/0.063/0     | dominant nad；en3f1_rx 抬升   | PASS；ih=1.225 即 en3f1_rx io 域抬升，符合预期                                                                                                                                                                                                                                                                                                                                                                                        |
+| c1e | ch5_c1e_dbmiss_run1.csv + run2   | 应用 67s/69s            | low (ih 0.069/0.068)           | 0.061/0.068/0.026/0.001/0/0/0             | dominant ib/ih             | **预期设错（A 类）定案**：run2（drop_caches 内联）与 run1 计数逐列一致（io_write 0.0932 vs 0.0921）→ run1 本就冷读、页缓存假说排除；**纯读负载点亮 io_write（0.092M/s=115×空载）而 io_reads 恒死** → eMMC 读方向记入 IO_Write（设备视角）；量级 ~8MB/s vs DMA 锚点 Gbps 级差 3 个数量级 → 判 low 如实。预期修订 low；**方向语义新发现入论文素材**（0x73/0x74 设备视角交叉实证）                                                                                                                                                   |
+| c1f | ch5_c1f_sbrndwr_run1.csv         | 应用 31s + 尾 34s        | low (cr 0.064)                 | 0.064/0.040/0.032/0.001/0/0/0             | dominant cr 或 wb           | **预期设错（A 类）定案**：eMMC 随机写仅 ~4.5MB/s（io_reads 0.071M/s×64B），a72/mem 域 6–9× 抬升但绝对值小 → 判 low 如实；**纯写负载点亮 io_reads（140×）**=方向交叉实证的另一半（与 c1e 互证 0x73/0x74 设备视角）；预期修订 low                                                                                                                                                                                                                                                          |
+| c2b | ch5_c2b_netout_run2.csv          | 应用 30s                | dominant nad (1.566)           | 0.493/1.067/0.316/0.003/1.566/0.667/0.011 | dominant ih（E2 armsend 签名） | **准 PASS（预期微调）**：流量真实（en3f1_rx=pf1hpf_tx 1416M/s≈11.3Gbps 1:1、ACK 回程 2.8M/s）；ih+nad 双亮签名复现（ih 1.067 与 E2 1.000 同量级），但 arm 顶点饱和（n=0.967 打满 6.6Gbps cap 锚点、SAT-SUSPECT 如实）后份额路由给 nad → 头名 ih→nad 漂移；与 E2"近平局、缺口=主机写入侧"边界标注一致；tx≈0 ✓、p1 未用 ✓                                                                                                                                                                                   |
+| c2c | ch5_c2c_tx_run1.csv（旧失败文件复打包）    | 应用 1s                 | —                              | —                                         | tx 点亮                      | **仍未重跑**（新包时间戳与旧轮逐字节一致）；helong netserver 检查后跑 run2                                                                                                                                                                                                                                                                                                                                                                          |
+| c2c | ch5_c2c_tx_run2.csv              | 应用 31s                | low（tx 0.001）                  | 0.045/0.017/0.022/0.001/0/0.004/0.001     | tx 点亮                      | **姿势错误（C 类）+ 配置事实发现**：netperf 连上 helong 跑满 30s、p1_tx 13M/s（~104Mbps）+ACK 0.28M/s 回程=流量真实，但 **en3f1_rx=0.0000（Arm 数据口分文未动）**；pcie1_tx 15.3M/s≈pcie0_rx 15.3M/s 全程 1:1 对账 → Arm 数据走 pcie1 出主机、fujian 主机软件转发投回 BF2（pf1hpf_rx 13M/s→p1 出线）=**主机折返**；**主 BF2 的 Arm 与 p1 无二层直连**（§5.6 ping 通一直是折返路，掩盖至今）；速率卡 ~104Mbps（折返瓶颈）；引擎 tx=0.001 如实（13M/s÷12.5GB/s 线速锚点=0.001）；**pcie0_tx 53M/s（≈4×线速）记账未解留待考**。改主机口径重跑（tx=主机→网络的本来定义）     |
+| c2c | ch5_c2c_host_run1.csv（主机口径 run3） | 应用 56s（流 30s，28s 在窗内） | low（tx 0.027，leader nhd 0.048） | 0.002/0.000/0.010/0.000/0.010/0.048/0.027 | tx 点亮（nad 删）               | **实质 PASS（预期修订 A 类）**：netperf 跑满 30s ~5.5Gbps 稳态、三层一致（pcie0_rx 683M/s≈pcie1_tx 685M/s≈p1_tx 5s 均值 712M/s）→ **p1_tx 抬升=tx 路径首证 ✓**；**Arm 分文未动**（pcie1_rx 2.5M/s 平、tile 近空载、SF 列全零）→ eSwitch HW 转发正常、nad 不随行=主机口径设计意图，预期删 nad；速率卡 ~5.5Gbps≈helong Arm netserver 收包平台（~6Gbps 估计）；netdev 计数 5s 锯齿=统计上报伪影（5s 合计与 TLR 稳态口径一致）；**pcie1_tx 计入主机→ASIC 穿透 TLP**（E0-1/c2b 交叉实证；与 pcie0_tx 53M/s 同列账目待考）；流前 3s 落 pre-idle（启动时序偏斜，不影响判定） |
 
 **批次一判定：闭环通过（8/8=100%≥80%，9/30）**——3 轮干净 PASS（c1b/c1c/c1d）+ 5 轮预期修订/环境限制 PASS（c1a/c1e/c1f/c2b/c2c 主机口径 run3）；c2c 三轮（连接失败/主机折返/主机口径）全部诊断完毕，**批次一结束**。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感 ③**主 BF2 Arm↔p1 无二层直连（主机折返实证）**——§5.6 相关结论需加折返脚注 ④**tx 路径首证（9/30 c2c run3）**：主机→网络 p1 出口 5.5Gbps 稳态、eSwitch HW 转发（Arm 不参与）；pcie1_tx 穿透 TLP 记账怪癖留待考；netdev 计数 5s 锯齿伪影（TLR 口径稳态）→ 论文 eSwitch 环境限制脚注素材齐（SF 入向死亡点+折返+共享交换机段）。
 
