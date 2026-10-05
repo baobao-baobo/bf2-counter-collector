@@ -526,47 +526,51 @@ tar czf /tmp/ch5_b2.tar.gz results/ch5_c3*.csv results/ch5_c3*.phase.log \
 #   本轮判读重点是聚合份额与多实例共存下的 M1 分解；干净的 per-instance 份额
 #   对照由 c5b（GUPS×4，纯内存表）承担：
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+# 10/05 修订：四实例各钉一核 0/1/2/3（4-7 常驻 mlnx_snap_emu 且 -b 0-3 只采前四核）
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run1.csv \
-  -a "sh -c '/root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=16777216 --reads=200000 \
   --db=/root/bf2k/data/dbtest > /tmp/db16.log 2>&1 & \
-  /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  taskset -c 1 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=67108864 --reads=400000 \
   --db=/root/bf2k/data/dbtest > /tmp/db64.log 2>&1 & \
-  /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  taskset -c 2 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=268435456 --reads=800000 \
   --db=/root/bf2k/data/dbtest > /tmp/db256.log 2>&1 & \
-  /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  taskset -c 3 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=1073741824 --reads=1600000 \
   --db=/root/bf2k/data/dbtest > /tmp/db1g.log 2>&1 & \
   wait'" -b 0-3 -t 900
 
 # c5b GUPS×4 异表尺寸（64M/256M/1G/2G 各 60s → wb+cr miss 四路并发；
-#   RAM 预算 9GB，四表共 3.3GB，下调自原案 6.6GB）：
+#   RAM 预算 9GB，四表共 3.3GB，下调自原案 6.6GB；10/05 修订：各钉一核 0-3）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5b_gups4x_run1.csv \
-  -a "sh -c '/root/bf2k/bench/bin/gups 23 60 > /tmp/gups1.log 2>&1 & \
-  /root/bf2k/bench/bin/gups 25 60 > /tmp/gups2.log 2>&1 & \
-  /root/bf2k/bench/bin/gups 27 60 > /tmp/gups3.log 2>&1 & \
-  /root/bf2k/bench/bin/gups 28 60 > /tmp/gups4.log 2>&1 & wait'" -b 0-3 -t 120
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/gups 23 60 > /tmp/gups1.log 2>&1 & \
+  taskset -c 1 /root/bf2k/bench/bin/gups 25 60 > /tmp/gups2.log 2>&1 & \
+  taskset -c 2 /root/bf2k/bench/bin/gups 27 60 > /tmp/gups3.log 2>&1 & \
+  taskset -c 3 /root/bf2k/bench/bin/gups 28 60 > /tmp/gups4.log 2>&1 & wait'" -b 0-3 -t 120
 
-# c6a sockperf TCP 出向压载（BF2 客户端→fujian sr；ih/nad 出向签名）：
+# c6a sockperf TCP 出向压载（BF2 客户端→fujian sr；ih/nad 出向签名；
+#   10/05 修订：钉核 0-3；前置=fujian 上 sockperf sr 已起）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6a_socktcp_run1.csv \
-  -a "sockperf ul -i 192.168.56.11 -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
+  -a "taskset -c 0-3 sockperf ul -i 192.168.56.11 -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
 
 # c6b sockperf UDP 出向压载（与 c6a 仅换传输；UDP pps 更高、无流控）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run1.csv \
-  -a "sockperf ul -i 192.168.56.11 --udp -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
+  -a "taskset -c 0-3 sockperf ul -i 192.168.56.11 --udp -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
 
-# c6c sysbench 随机读·页缓存模式（buffered：缺页+拷贝 → cr 参与）：
+# c6c sysbench 随机读·页缓存模式（buffered：缺页+拷贝 → cr 参与；
+#   10/05 风险注：批次二已证 eMMC 档负载判 low（c4d/c4e），若本轮判 low 属 A 类、有现成解释）：
 sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6c_rndrd_buf_run1.csv \
-  -a "cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G \
+  -a "cd /root/bf2k/data && taskset -c 0-3 sysbench fileio --file-num=8 --file-total-size=4G \
   --file-test-mode=rndrd --file-block-size=16K --file-io-mode=sync --threads=4 \
   --time=30 run" -b 0-3 -t 60
 
-# c6d sysbench 随机读·O_DIRECT（绕过页缓存 → cr 分量消失、纯 io；与 c6c 对照）：
+# c6d sysbench 随机读·O_DIRECT（绕过页缓存 → cr 分量消失、纯 io；与 c6c 对照；
+#   同 c6c 风险注）：
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6d_rndrd_direct_run1.csv \
-  -a "cd /root/bf2k/data && sysbench fileio --file-num=8 --file-total-size=4G \
+  -a "cd /root/bf2k/data && taskset -c 0-3 sysbench fileio --file-num=8 --file-total-size=4G \
   --file-test-mode=rndrd --file-block-size=16K --file-io-mode=sync \
   --file-extra-flags=direct --threads=4 --time=30 run" -b 0-3 -t 60
 ```
