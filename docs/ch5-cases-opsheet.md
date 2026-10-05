@@ -499,6 +499,14 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c4e_fillrnd_run1.csv \
 | c4d | wb 主导                    | a72 写 + io 写（顺序 eMMC）；与 c4e 对照                                                                        | 同上                                  |
 | c4e | wb 主导 + io 更高            | 随机 eMMC 写 io 高于 c4d（顺序）                                                                               | 同上                                  |
 
+> **2026-10-05 实测对照（结案，详情 docs/batch2-results.md）**：判决层 10/10
+> 物理正确、0 B 类 0 C 类。c3a→c3b victim_write 0.126→1.000 饱和（7.9×）；
+> c3c→c3d cr 0.066→0.750（11.4×）；c1e↔c3e 翻转对成立（判决 low→dominant
+> cr、raw io_write 576K→4.8K/s=120×）；c4a/b/c 判别签名在 raw 比值——seq/rnd
+> 用 bypass 6.6×、读/写用 l3_emem_wr 32×。三处 A 类修订：c4b 逐出签名在每访问
+> 比值非绝对值；c4c wb 不抬升（纯 DRAM 写不走 PCIe）+ ih/ib=1.000 为 M1 份额
+> 伪影；c4d/c4e 判 low（eMMC 档低于锚点尺度，c1e/c1f 先例，签名在 raw io）。
+
 ### 回传（批次 2）
 
 ```bash
