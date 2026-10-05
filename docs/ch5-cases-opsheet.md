@@ -525,22 +525,32 @@ tar czf /tmp/ch5_b2.tar.gz results/ch5_c3*.csv results/ch5_c3*.phase.log \
 #   诚实备注：四实例共享 OS 页缓存，per-instance 的"存储↔内存"对比会被抹平——
 #   本轮判读重点是聚合份额与多实例共存下的 M1 分解；干净的 per-instance 份额
 #   对照由 c5b（GUPS×4，纯内存表）承担：
-sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+# 【10/05 首跑失败（C 类）→ 修复版】首跑三实例死于
+#   "open error: lock .../dbtest/LOCK: Resource temporarily unavailable"——LevelDB
+#   LOCK 文件互斥，四进程不能同开一个库（只有 1G 实例侥幸拿锁）。
+#   修复：四份独立库副本（cp 读源写副本、副本经页缓存驻留内存 → 不再 drop_caches，
+#   否则四实例又落 eMMC 档判 low）；窗长 900→300（内存档相位 ~1 分钟级）。
+#   期望修订：dominant cr 或 multi（四路内存并发，同 c5b 性质）；判读附加对照不变
+#   （四日志 ops/s 份额）；cp 脏页回写会带 io 域抬升，属已知旁支。
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a1
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a2
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a3
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a4
 # 10/05 修订：四实例各钉一核 0/1/2/3（4-7 常驻 mlnx_snap_emu 且 -b 0-3 只采前四核）
-sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run1.csv \
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run2.csv \
   -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=16777216 --reads=200000 \
-  --db=/root/bf2k/data/dbtest > /tmp/db16.log 2>&1 & \
+  --db=/root/bf2k/data/dbtest_c5a1 > /tmp/db16.log 2>&1 & \
   taskset -c 1 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=67108864 --reads=400000 \
-  --db=/root/bf2k/data/dbtest > /tmp/db64.log 2>&1 & \
+  --db=/root/bf2k/data/dbtest_c5a2 > /tmp/db64.log 2>&1 & \
   taskset -c 2 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=268435456 --reads=800000 \
-  --db=/root/bf2k/data/dbtest > /tmp/db256.log 2>&1 & \
+  --db=/root/bf2k/data/dbtest_c5a3 > /tmp/db256.log 2>&1 & \
   taskset -c 3 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
   --num=2000000 --value_size=1000 --cache_size=1073741824 --reads=1600000 \
-  --db=/root/bf2k/data/dbtest > /tmp/db1g.log 2>&1 & \
-  wait'" -b 0-3 -t 900
+  --db=/root/bf2k/data/dbtest_c5a4 > /tmp/db1g.log 2>&1 & \
+  wait'" -b 0-3 -t 300
 
 # c5b GUPS×4 异表尺寸（64M/256M/1G/2G 各 60s → wb+cr miss 四路并发；
 #   RAM 预算 9GB，四表共 3.3GB，下调自原案 6.6GB；10/05 修订：各钉一核 0-3）：
@@ -556,8 +566,18 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6a_socktcp_run1.csv \
   -a "taskset -c 0-3 sockperf ul -i 192.168.56.11 -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
 
 # c6b sockperf UDP 出向压载（与 c6a 仅换传输；UDP pps 更高、无流控）：
+# 【10/05 首跑失败（C 类）→ 重跑】app 相位仅 1s（sockperf 秒退）。最可能根因：
+#   fujian 端服务端是 TCP 模式（sockperf sr）——UDP 客户端需服务端以
+#   sockperf sr --udp 重启，否则建立失败秒退。重跑二选一：
+#   ① fujian 上服务端改 sockperf sr --udp（跑完改回），BF2 端下方 run1 原命令重跑
+#      （输出改 -o results/ch5_c6b_sockudp_run2.csv）；
+#   ② 回退 netperf（netserver 无需换模式）：直接跑 run2 命令。
 sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run1.csv \
   -a "taskset -c 0-3 sockperf ul -i 192.168.56.11 --udp -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
+
+# c6b 回退（netperf UDP_STREAM，同方向同报文尺寸）：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run2.csv \
+  -a "taskset -c 0-3 netperf -H 192.168.56.11 -t UDP_STREAM -l 30 -- -m 1472" -b 0-3 -t 60
 
 # c6c sysbench 随机读·页缓存模式（buffered：缺页+拷贝 → cr 参与；
 #   10/05 风险注：批次二已证 eMMC 档负载判 low（c4d/c4e），若本轮判 low 属 A 类、有现成解释）：
@@ -591,6 +611,22 @@ c6a 复用 c2b（netperf TCP_STREAM 出向）、c6b 改 `netperf -H 192.168.56.1
 | c6b | dominant ih（E2 签名）     | 与 c6a 对照：pps 更高、核域略升（UDP 无流控）                                                              | 同上    |
 | c6c | cr 中度 + ib             | buffered：缺页读+拷贝（a72 可见）                                                                    | 同上    |
 | c6d | dominant ib（cr 分量消失）   | 与 c6c 对照：a72 明显下降、io 持平                                                                    | 同上    |
+
+> **2026-10-05 首跑实测对照（c5a/c6b 重跑后闭合，详见 docs/batch3-results.md）**：
+> c5b **PASS**——dominant cr 1.791（期望 cr/wb ✓；ib=1.000 为 M1 份额伪影，同
+> c4c）；四实例 GUP/s 0.011/0.007/0.004/0.002 = 45.8%/29.2%/16.7%/8.3%，份额
+> 随表尺寸单调递减（大表单次更新 DRAM 流量大 → 速率低），聚合 0.024 vs 单跑
+> 0.018。c6a **A 类准 PASS**——实测 dominant nad 0.287 / ih 0.099（期望 dominant
+> ih）；流量真实（en3f1_rx 166.6M/s ≈1.33Gbps、pcie1_tx 180M/s、io_reads
+> 2.57M/s），未饱和档头名 = nad、与 c2b 同族（E2 的 ih 头名是 arm 顶点饱和档
+> 的份额路由产物）→ 期望按实测修订。c6c/c6d **A 类**（风险注已预告判 low）：
+> 判决均 low，但 raw 对照成立——a72 3.67M→2.70M（−27%）、mem_reads 1.77M→
+> 0.82M（−54%，buffered 的页缓存拷贝分量）、io_reads 7.4K→7.2K 持平（同一批
+> eMMC 读，direct 少了拷贝与预读）——机制切换在 raw 计数器层清晰可见。c5a
+> **C 类**（设计缺陷，修复版见上）：四实例三死于 LevelDB LOCK 互斥（"open
+> error: lock .../dbtest/LOCK: Resource temporarily unavailable"），仅 1G 实例
+> 跑完（45.9µs/op，eMMC 档，与 c1e 同档判 low）；修复 = 四库副本内存驻留 +
+> 窗 300s。c6b **C 类**（app 相位 1s、sockperf 秒退）待重跑。
 
 ### 回传（批次 3）
 
