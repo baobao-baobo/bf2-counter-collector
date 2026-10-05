@@ -612,21 +612,28 @@ c6a 复用 c2b（netperf TCP_STREAM 出向）、c6b 改 `netperf -H 192.168.56.1
 | c6c | cr 中度 + ib             | buffered：缺页读+拷贝（a72 可见）                                                                    | 同上    |
 | c6d | dominant ib（cr 分量消失）   | 与 c6c 对照：a72 明显下降、io 持平                                                                    | 同上    |
 
-> **2026-10-05 首跑实测对照（c5a/c6b 重跑后闭合，详见 docs/batch3-results.md）**：
+> **2026-10-05 首跑实测对照（详情 docs/batch3-results.md；口径修正注见该文 §0）**：
 > c5b **PASS**——dominant cr 1.791（期望 cr/wb ✓；ib=1.000 为 M1 份额伪影，同
 > c4c）；四实例 GUP/s 0.011/0.007/0.004/0.002 = 45.8%/29.2%/16.7%/8.3%，份额
 > 随表尺寸单调递减（大表单次更新 DRAM 流量大 → 速率低），聚合 0.024 vs 单跑
 > 0.018。c6a **A 类准 PASS**——实测 dominant nad 0.287 / ih 0.099（期望 dominant
-> ih）；流量真实（en3f1_rx 166.6M/s ≈1.33Gbps、pcie1_tx 180M/s、io_reads
-> 2.57M/s），未饱和档头名 = nad、与 c2b 同族（E2 的 ih 头名是 arm 顶点饱和档
+> ih）；流量真实（en3f1_rx 170.6MB/s ≈1.36Gbps、pcie1_tx 185.2M、pcie0_tx
+> 186.1M 三方 1:1 镜像=新账目、p1_tx 66B/s 未用、a72 1.79M/s / io_reads
+> 0.46M/s），未饱和档头名 = nad、与 c2b 同族（E2 的 ih 头名是 arm 顶点饱和档
 > 的份额路由产物）→ 期望按实测修订。c6c/c6d **A 类**（风险注已预告判 low）：
 > 判决均 low，但 raw 对照成立——a72 3.67M→2.70M（−27%）、mem_reads 1.77M→
 > 0.82M（−54%，buffered 的页缓存拷贝分量）、io_reads 7.4K→7.2K 持平（同一批
 > eMMC 读，direct 少了拷贝与预读）——机制切换在 raw 计数器层清晰可见。c5a
-> **C 类**（设计缺陷，修复版见上）：四实例三死于 LevelDB LOCK 互斥（"open
+> **C 类→修复重跑（run2）闭合**：首跑四实例三死于 LevelDB LOCK 互斥（"open
 > error: lock .../dbtest/LOCK: Resource temporarily unavailable"），仅 1G 实例
-> 跑完（45.9µs/op，eMMC 档，与 c1e 同档判 low）；修复 = 四库副本内存驻留 +
-> 窗 300s。c6b **C 类**（app 相位 1s、sockperf 秒退）待重跑。
+> 跑完（45.9µs/op，eMMC 档）；run2（四库副本+免 drop_caches+窗 300s）四实例
+> 全跑完——应用层梯度 2.6K/9.6K/90.4K/98.4K（38×，小实例落 eMMC、大实例内存档
+> ~100K）；**A 类闭合**：四路并发只撑 9s（读量配平≠等时长），全窗 a72 3.39M/s
+> 被 70s 涓流稀释 → 判 low 与窗口自洽（cr 比值= a72 比值= 0.52），切片取证
+> 4-way 段 a72 17.3M/s = 2.7× c3e；改进项=峰值窗口口径；可选扩展=run3 等时长
+> 配平版（200K/600K/5.5M/6M）。c6b **C 类两次**（run1/run2 app 相位均 1s、
+> 零流量秒退）待 run3——先查 fujian `pgrep -a netserver; pgrep -a sockperf`
+> 并贴终端报错原文。
 
 ### 回传（批次 3）
 
@@ -749,6 +756,10 @@ scp 回本地后贴回，我判读并写 docs/batch3-results.md 闭合批次三�
 | c2c | ch5_c2c_host_run1.csv（主机口径 run3） | 应用 56s（流 30s，28s 在窗内） | low（tx 0.027，leader nhd 0.048） | 0.002/0.000/0.010/0.000/0.010/0.048/0.027 | tx 点亮（nad 删）               | **实质 PASS（预期修订 A 类）**：netperf 跑满 30s ~5.5Gbps 稳态、三层一致（pcie0_rx 683M/s≈pcie1_tx 685M/s≈p1_tx 5s 均值 712M/s）→ **p1_tx 抬升=tx 路径首证 ✓**；**Arm 分文未动**（pcie1_rx 2.5M/s 平、tile 近空载、SF 列全零）→ eSwitch HW 转发正常、nad 不随行=主机口径设计意图，预期删 nad；速率卡 ~5.5Gbps≈helong Arm netserver 收包平台（~6Gbps 估计）；netdev 计数 5s 锯齿=统计上报伪影（5s 合计与 TLR 稳态口径一致）；**pcie1_tx 计入主机→ASIC 穿透 TLP**（E0-1/c2b 交叉实证；与 pcie0_tx 53M/s 同列账目待考）；流前 3s 落 pre-idle（启动时序偏斜，不影响判定） |
 
 **批次一判定：闭环通过（8/8=100%≥80%，9/30）**——3 轮干净 PASS（c1b/c1c/c1d）+ 5 轮预期修订/环境限制 PASS（c1a/c1e/c1f/c2b/c2c 主机口径 run3）；c2c 三轮（连接失败/主机折返/主机口径）全部诊断完毕，**批次一结束**。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感 ③**主 BF2 Arm↔p1 无二层直连（主机折返实证）**——§5.6 相关结论需加折返脚注 ④**tx 路径首证（9/30 c2c run3）**：主机→网络 p1 出口 5.5Gbps 稳态、eSwitch HW 转发（Arm 不参与）；pcie1_tx 穿透 TLP 记账怪癖留待考；netdev 计数 5s 锯齿伪影（TLR 口径稳态）→ 论文 eSwitch 环境限制脚注素材齐（SF 入向死亡点+折返+共享交换机段）。
+
+> **批次二/三逐轮判决（本表未逐行回填，以结案记录为准）**：批次二见
+> docs/batch2-results.md（10 轮全过，0 B 类 0 C 类）；批次三见
+> docs/batch3-results.md（c5b PASS；c6a/c6c/c6d/c5a-run2 A 类闭合；c6b 待 run3）。
 
 ### 批次一补跑块（9/24 开，9/30 闭环）——c2c 主机口径已执行完毕（记录表末行 ch5_c2c_host_run1.csv）
 
