@@ -677,8 +677,9 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run2.csv \
   --db=/root/bf2k/data/dbtest_c5a4 > /tmp/db1g.log 2>&1 & \
   wait'" -b 0-3 -t 300
 
-# 3. 跑完即查：四个 log 都应有 "readrandom : ... micros/op"（首跑只有 db1g.log 有）
-tail -2 /tmp/db16.log /tmp/db64.log /tmp/db256.log /tmp/db1g.log
+# 3. 跑完即查：四个 log 都应有 "readrandom : ... micros/op"（首跑只有 db1g.log 有；
+#   设备 busybox tail 不支持 "-2 多文件"，用 -n 2 逐个看）
+for f in /tmp/db16.log /tmp/db64.log /tmp/db256.log /tmp/db1g.log; do echo "== $f"; tail -n 2 $f; done
 cat results/ch5_c5a_db4x_run2.csv.phase.log   # app 相位应 40-120s；任一 log 缺跑完行就停下贴给我
 ```
 
