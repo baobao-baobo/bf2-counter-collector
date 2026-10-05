@@ -630,12 +630,94 @@ c6a 复用 c2b（netperf TCP_STREAM 出向）、c6b 改 `netperf -H 192.168.56.1
 
 ### 回传（批次 3）
 
+> 需要重跑的 c5a/c6b 两轮命令已单独抽出，见下一节「批次 3 重跑单」；本节的
+> 回传通配会把重跑的 run2 文件一起带上。
+
 ```bash
 tar czf /tmp/ch5_b3.tar.gz results/ch5_c5*.csv results/ch5_c5*.phase.log \
   results/ch5_c6*.csv results/ch5_c6*.phase.log \
   /tmp/db16.log /tmp/db64.log /tmp/db256.log /tmp/db1g.log /tmp/gups1.log \
   /tmp/gups2.log /tmp/gups3.log /tmp/gups4.log
 ```
+
+---
+
+## 批次 3 重跑单（2026-10-05：仅 c5a + c6b 两轮，其余四轮已定案）
+
+> 单独成节：本表只含需要重跑的内容，其余轮次无需再跑。总耗时 ≈10 分钟
+> （c5a 四副本 ~2 分钟 + 窗口 5 分钟；c6b 窗口 1 分钟）。
+
+### ① c5a 重跑（修复版：四库副本，LOCK 问题已解决）
+
+**改了什么**：首跑三实例死于 LevelDB LOCK 互斥（四进程不能同开一个库）——现在
+先复制四份独立库副本（cp 写入经页缓存驻留内存），每实例开自己的库；**不再
+drop_caches**（副本已在内存里，清了反而落 eMMC 档）；窗长 900→300s。RAM 边缘
+（副本 8GB + 块缓存 1.3GB vs 可用 9.2GB），cp 脏页回写会带 io 域抬升，属已知旁支。
+
+```bash
+# 1. 四份库副本（一次性，~2 分钟；磁盘余量 36G 足够）
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a1
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a2
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a3
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a4
+
+# 2. 四实例并发读（各开各的库、各钉一核；输出 run2，保留首跑坏数据）
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run2.csv \
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=16777216 --reads=200000 \
+  --db=/root/bf2k/data/dbtest_c5a1 > /tmp/db16.log 2>&1 & \
+  taskset -c 1 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=400000 \
+  --db=/root/bf2k/data/dbtest_c5a2 > /tmp/db64.log 2>&1 & \
+  taskset -c 2 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=268435456 --reads=800000 \
+  --db=/root/bf2k/data/dbtest_c5a3 > /tmp/db256.log 2>&1 & \
+  taskset -c 3 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=1073741824 --reads=1600000 \
+  --db=/root/bf2k/data/dbtest_c5a4 > /tmp/db1g.log 2>&1 & \
+  wait'" -b 0-3 -t 300
+
+# 3. 跑完即查：四个 log 都应有 "readrandom : ... micros/op"（首跑只有 db1g.log 有）
+tail -2 /tmp/db16.log /tmp/db64.log /tmp/db256.log /tmp/db1g.log
+cat results/ch5_c5a_db4x_run2.csv.phase.log   # app 相位应 40-120s；任一 log 缺跑完行就停下贴给我
+```
+
+### ② c6b 重跑（UDP 出向；二选一）
+
+**改了什么**：首跑 app 相位仅 1s（sockperf 秒退），最可能根因 = fujian 端服务端
+是 TCP 模式（`sockperf sr`），UDP 客户端建立失败。
+
+**路线②（推荐，省事）**：netperf 回退——fujian 的 netserver 无需任何改动，一条命令：
+
+```bash
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run2.csv \
+  -a "taskset -c 0-3 netperf -H 192.168.56.11 -t UDP_STREAM -l 30 -- -m 1472" -b 0-3 -t 60
+```
+
+**路线①（保持与 c6a 同工具）**：fujian 上把服务端重启为 UDP 模式（跑完记得改回
+`sockperf sr`），BF2 端重跑原命令（输出名改 run2）：
+
+```bash
+# fujian 上：先杀掉旧服务端再起 UDP 版
+#   pkill sockperf; sockperf sr --udp &
+# BF2 上：
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run2.csv \
+  -a "taskset -c 0-3 sockperf ul -i 192.168.56.11 --udp -t 30 --mps=max --msg-size=1472" -b 0-3 -t 60
+```
+
+跑完即查：`cat results/ch5_c6b_sockudp_run2.csv.phase.log`（app 相位应 ≈30s；
+仍为 1s 就把当时的报错原文贴给我）。
+
+### ③ 回传（两轮都跑完后）
+
+```bash
+tar czf /tmp/ch5_b3_rerun.tar.gz results/ch5_c5a_db4x_run2.csv \
+  results/ch5_c5a_db4x_run2.csv.phase.log results/ch5_c6b_sockudp_run2.csv \
+  results/ch5_c6b_sockudp_run2.csv.phase.log \
+  /tmp/db16.log /tmp/db64.log /tmp/db256.log /tmp/db1g.log
+```
+
+scp 回本地后贴回，我判读并写 docs/batch3-results.md 闭合批次三。
 
 ---
 
