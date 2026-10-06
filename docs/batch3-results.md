@@ -30,8 +30,9 @@ c6c/c6d 首报数字经复核无高估（同口径重算一致）。判决层（
 | c5a run2 | dominant cr 或 multi（修订） | low（cr 0.200 med） | 4-way 段 a72 17.3M/s、全窗 3.39M/s | **A 类**（§2.2，切片取证闭合） |
 | c5b | dominant cr/wb | dominant cr **1.791** ✓ | GUP/s 份额 45.8/29.2/16.7/8.3% | **PASS** |
 | c6a | dominant ih（E2 签名） | dominant nad 0.287 / ih 0.099 | en3f1_rx 170.6MB/s≈1.36Gbps | **A 类**（准 PASS，§2.3） |
-| c6b run1 | dominant ih | low（app 相位 1s） | sockperf 秒退 | **C 类**（待 run3） |
-| c6b run2 | dominant nad 或 ih | low（app 相位 1s） | 同秒退，零流量 | **C 类**（待 run3） |
+| c6b run1 | dominant ih | low（app 相位 1s） | sockperf 秒退 | **C 类**（§3.2） |
+| c6b run2 | dominant nad 或 ih | low（app 相位 1s） | 同秒退，零流量 | **C 类**（§3.2） |
+| c6b run3 | dominant nad 或 ih（修订） | dominant nad **0.309** ✓ | UDP 1.48Gbps、pps 126.1K（vs c6a 115.9K） | **PASS** |
 | c6c | cr 中度 + ib | low（ih 0.051） | a72 3.67M/s、mem_reads 1.77M/s | **A 类**（风险注已预告） |
 | c6d | dominant ib（cr 分量消失） | low（ih 0.031） | a72 2.70M/s、io_reads 持平 | **A 类**（风险注已预告） |
 
@@ -110,6 +111,27 @@ io 域其实全程在忙（对 eMMC 档实例而言 eMMC 就是公共瓶颈，�
 "判决同 low、raw 可分离"本身即论文素材：模型边界（存储域无覆盖）与计数器判别力
 （机制切换可见）在同一对轮次里同时成立。
 
+### 2.5 c6b run3：UDP 出向压载（PASS，批次三最后一轮）
+
+判决 dominant nad 0.309（排名 nad 0.309 / ih 0.107 / nhd 0.092），期望
+"dominant nad 或 ih（修订）"命中。流量真实且完整：app 相位 30s 跑满，
+en3f1_rx **185.6MB/s ≈ 1.48Gbps**（UDP，无流控）、enp3s0f1s0_tx 186.9MB/s
+同流镜像、p1 未用、tile 域 a72 1.38M/s / io_reads 522K/s（TX 走 DMA）。
+c6b↔c6a 对照（期望"UDP pps 更高"）：
+
+| | c6a TCP | c6b UDP | 对照 |
+|---|---|---|---|
+| 带宽（en3f1_rx） | 170.6MB/s ≈ 1.36Gbps | 185.6MB/s ≈ 1.48Gbps | +8.8% |
+| pps（÷1472B） | 115.9K | **126.1K** | +8.8% ✓ |
+| 判决 | nad 0.287 / ih 0.099 | nad 0.309 / ih 0.107 | 同族 ✓ |
+| a72 | 1.79M/s | 1.38M/s | 略降（见下） |
+
+小处 A 类修订：期望"核域略升（UDP 无流控）"未命中，实测 a72 反而 −23%——
+两者都卡在同一个 **Arm 栈 TX 平台 ~1.5Gbps**（非流控受限），而 UDP 路径不维护
+TCP 状态机/ACK 处理，每字节 CPU 成本更低。另：UDP 的 en3f1_rx 逐秒值在
+52M-307M/s 间振荡（netperf 发送突发模式），TCP 则基本稳态 ~190M/s——
+同样的"平台受限、突发形态不同"旁证。
+
 ## 3. C 类记录（均已定位）
 
 ### 3.1 c5a run1：LevelDB LOCK 互斥（设计缺陷）
@@ -121,15 +143,15 @@ eMMC 档，与 c1e 同档）。修复：四份独立库副本（cp 经页缓存�
 drop_caches）+ 窗长 300s + 期望修订 dominant cr 或 multi → run2 四实例全部
 跑完（§2.2）。
 
-### 3.2 c6b run1/run2：app 相位两次都是 1s
+### 3.2 c6b run1/run2：app 相位两次都是 1s（run3 已解决，根因确认）
 
-run1（sockperf --udp）秒退；run2 同样 1s。CSV 取证：1s 内仅进程启动脉冲
-（a72 突发 ~1.5M），**零网络字节**（各口 <1KB/s 背景）——客户端在发送任何
-UDP 之前就死了。最可能根因（按可能性排序）：①fujian 端 netserver 已死
-（批次 0 是 9/23 起的，设备可能重启过），netperf 控制连接被拒；②若走的是
-sockperf 路线①，服务端仍为 TCP 模式未改。**待用户提供当时终端报错原文 +
-fujian 端 `pgrep -a netserver; pgrep -a sockperf` 输出**，再跑 run3（netserver
-死则 `netserver -D -4` 后重跑路线②；服务端未改则重启 `sockperf sr --udp`）。
+run1（sockperf --udp）秒退；run2（用户确认走路线② netperf、未动 sockperf）
+同样 1s。CSV 取证：1s 内仅进程启动脉冲（a72 突发 ~1.5M），**零网络字节**
+（各口 <1KB/s 背景）——客户端在发送任何 UDP 之前就死了。签名 = netperf
+控制连接（TCP 12865 端口）被拒：**fujian 端 netserver 已死**（9/23 批次 0
+所起，期间设备重启过）。修复：fujian 上重启 `netserver -D -4` + 确认 12865
+监听 + BF2 上 2s 冒烟 → run3 相位 30s 跑满（§2.5 PASS）。经验入库：设备线
+服务端（netserver/sockperf sr）不是永久件，**每批次开跑前先 `pgrep` 验活**。
 
 ## 4. 对模型意味着什么（引擎评估）
 
@@ -146,10 +168,12 @@ fujian 端 `pgrep -a netserver; pgrep -a sockperf` 输出**，再跑 run3（nets
   头名-速率谱系（模型边界精确化）；c6c/c6d 机制切换 raw 对照表；c5a 的 38×
   缓存梯度 + 切片取证方法（峰值窗口口径的动机）。
 
-## 5. 批次验收状态与可选扩展
+## 5. 批次验收与可选扩展
 
-- **当前**：c5b PASS；c6a/c6c/c6d/c5a-run2 四轮 A 类诊断完备；c6b 待 run3。
-  run3 落地后按 ≥80% PASS + 全可诊断闭合批次三（预计 5 PASS + 1 准 PASS + 2 A 类）。
+- **批次三闭合（10/06）**：c5b、c6b-run3 两轮干净 PASS；c6a 准 PASS（A 类
+  头名修订）；c6c/c6d/c5a-run2 三轮 A 类诊断完备；**0 B 类（引擎缺陷）、
+  2 项 C 类全部定位并解决（LOCK 互斥 → 四库副本；netserver 已死 → 重启）**
+  → 批级通过（8/8 可判定，其中 2 PASS + 4 A 类 + 2 C 类已修复）。
 - **可选扩展（不阻塞，用户定夺）**：c5a run3 等时长配平版——读量改
   200K/600K/5.5M/6M（按实测速率 ×~60s），让四路并发撑满整窗、判决直接
   visible；成本 ~7 分钟设备时间（副本已在，免 cp）。若跑，判读标准同 run2

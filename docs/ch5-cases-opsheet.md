@@ -631,9 +631,12 @@ c6a 复用 c2b（netperf TCP_STREAM 出向）、c6b 改 `netperf -H 192.168.56.1
 > ~100K）；**A 类闭合**：四路并发只撑 9s（读量配平≠等时长），全窗 a72 3.39M/s
 > 被 70s 涓流稀释 → 判 low 与窗口自洽（cr 比值= a72 比值= 0.52），切片取证
 > 4-way 段 a72 17.3M/s = 2.7× c3e；改进项=峰值窗口口径；可选扩展=run3 等时长
-> 配平版（200K/600K/5.5M/6M）。c6b **C 类两次**（run1/run2 app 相位均 1s、
-> 零流量秒退）待 run3——先查 fujian `pgrep -a netserver; pgrep -a sockperf`
-> 并贴终端报错原文。
+> 配平版（200K/600K/5.5M/6M）。c6b **C 类两次 → run3 PASS（10/06）**：run1/run2
+> app 相位均 1s、零流量秒退，根因 = fujian netserver 已死（9/23 批次 0 所起，
+> 设备重启过）→ 重启 `netserver -D -4` 后 run3 相位 30s 跑满：dominant nad
+> 0.309 ✓（期望修订后命中）、UDP 1.48Gbps / pps 126.1K（vs c6a TCP 115.9K
+> +8.8% ✓）、a72 1.38M 略降（UDP 无 TCP 状态机、每字节 CPU 更省，两轮同卡
+> Arm 栈 TX 平台 ~1.5Gbps）。经验：**每批次开跑前先 pgrep 验活服务端**。
 
 ### 回传（批次 3）
 
