@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # path_data.py - differencing + path attribution for the G1-G7 app runs.
 #
-# Reads the phase-mode CSVs (results/g{1..7}_run{1..3}.csv + .phase.log),
+# Reads the phase-mode CSVs (results/g-series/g{1..7}_run{1..3}.csv + .phase.log),
 # subtracts the idle background (per counter: app mean - idle mean over
 # sampled rows; tile/L3 rotation columns are NaN on off-windows), applies
 # traffic-based segmentation for the network groups (G3/G7: rows with
@@ -28,7 +28,7 @@ import re
 import sys
 from statistics import median
 
-RES = sys.argv[1] if len(sys.argv) > 1 else "results"
+RES = sys.argv[1] if len(sys.argv) > 1 else "results/g-series"
 OUT = sys.argv[2] if len(sys.argv) > 2 else RES
 
 NET_THRESH = 1e6          # bytes/s: above this, the NIC is in benchmark

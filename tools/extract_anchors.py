@@ -9,10 +9,10 @@ Subcommands:
 
 Idle sources WITH phase logs (idle row = outside the phase window
 AND net_rx < NET_THRESH, same convention as tools/path_data.py):
-  results/g{1..7}_run{1..3}.csv    21 runs
-  results/e1_g3_run{1..3}.csv       3 runs
-  results/e1_g7_run{1..3}.csv       3 runs
-  results/e1_n2_run{1..3}.csv       3 runs
+  results/g-series/g{1..7}_run{1..3}.csv    21 runs
+  results/e1-series/e1_g3_run{1..3}.csv       3 runs
+  results/e1-series/e1_g7_run{1..3}.csv       3 runs
+  results/e1-series/e1_n2_run{1..3}.csv       3 runs
 
 Idle sources WITHOUT phase logs (collector convention = 5 s pre +
 5 s post; take the first/last 5 rows, still net-quiet filtered when
@@ -58,10 +58,10 @@ DEAD_SAT = 1000.0         # span sats below this (req/s) are dead counters
 PHASE_SOURCES = []
 for i in range(1, 8):
     for r in range(1, 4):
-        PHASE_SOURCES.append((os.path.join(RES, "g%d_run%d.csv" % (i, r)), True))
+        PHASE_SOURCES.append((os.path.join(RES, "g-series", "g%d_run%d.csv" % (i, r)), True))
 for tag in ("e1_g3", "e1_g7", "e1_n2"):
     for r in range(1, 4):
-        PHASE_SOURCES.append((os.path.join(RES, "%s_run%d.csv" % (tag, r)), True))
+        PHASE_SOURCES.append((os.path.join(RES, "e1-series", "%s_run%d.csv" % (tag, r)), True))
 
 # (path, has_phase_log)
 NOLOG_SOURCES = []
@@ -72,7 +72,7 @@ for name in ("e0_1_nhd", "e0_2_nad", "e0_3_emmc"):
     NOLOG_SOURCES.append((os.path.join(MSG, name + ".csv"), False))
 
 # calibration runs: continuous load, no phase log; sat/obs-max only
-CAL_SOURCES = [os.path.join(RES, n) for n in (
+CAL_SOURCES = [os.path.join(RES, "e1-series", n) for n in (
     "e1_n0_2a.csv", "e1_n0_2b.csv",
     "e1_n1_1g.csv", "e1_n1_5g.csv", "e1_n1_10g.csv", "e1_n1_20g.csv")]
 
