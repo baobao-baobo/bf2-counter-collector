@@ -797,6 +797,15 @@ tar czf /tmp/ch5_c5a_run3.tar.gz results/ch5_c5a_db4x_run3.csv \
 scp 回本地后贴回，我判读（期望 dominant cr 或 multi、四路并发撑满 app 窗口；
 若仍 low 按 §8.6 三类诊断，不阻塞）并更新 batch3-results.md 闭合。
 
+> **2026-10-06 实测对照（PASS，闭合）**：判决 dominant cr **0.797**（idle
+> max L_p 0.007 基线干净）。app 相位 65s、四 log 全跑完（3.14K/74.2K/92.1K/
+> 95.0K ops/s）。切片随退场单调递减：4-way 0-8s a72 15.0M/s → 3-way 8-60s
+> 12.3M/s → 2-way 60-65s 10.0M/s；全窗 12.3M/s = 1.9× c3e 单实例，cr 落
+> c3e 0.385 与 c5b 1.791 之间。**A 类加分发现**：db64 从 run2 的 eMMC 档
+> （9.6K）翻到内存档（74.2K）——**64M 缓存 = 存储/内存分界刀口**（16M 两轮
+> 稳 eMMC、256M/1G 两轮稳内存），为此 4-way 段仅 8s，窗口仍由 ≥3 路并发
+> 主导 60/65s，判决不受影响。详情 docs/batch3-results.md §2.6。
+
 ---
 
 ## 判读总流程（Claude 本地，每批次）
