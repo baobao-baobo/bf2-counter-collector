@@ -841,9 +841,46 @@ scp 回本地后贴回，我判读（期望 dominant cr 或 multi、四路并发
 
 **批次一判定：闭环通过（8/8=100%≥80%，9/30）**——3 轮干净 PASS（c1b/c1c/c1d）+ 5 轮预期修订/环境限制 PASS（c1a/c1e/c1f/c2b/c2c 主机口径 run3）；c2c 三轮（连接失败/主机折返/主机口径）全部诊断完毕，**批次一结束**。全部不一致按 §8.6 三类诊断完毕，无引擎缺陷；产出论文级发现：①0x73/0x74 IO 计数器方向=设备视角（c1e 纯读亮 0x73、c1f 纯写亮 0x74 交叉实证）②eMMC 负载规模（读写均单数 MB/s）比 DMA 锚点低 3 个数量级，io 域路径对存储负载天然不敏感 ③**主 BF2 Arm↔p1 无二层直连（主机折返实证）**——§5.6 相关结论需加折返脚注 ④**tx 路径首证（9/30 c2c run3）**：主机→网络 p1 出口 5.5Gbps 稳态、eSwitch HW 转发（Arm 不参与）；pcie1_tx 穿透 TLP 记账怪癖留待考；netdev 计数 5s 锯齿伪影（TLR 口径稳态）→ 论文 eSwitch 环境限制脚注素材齐（SF 入向死亡点+折返+共享交换机段）。
 
-> **批次二/三逐轮判决（本表未逐行回填，以结案记录为准）**：批次二见
-> docs/batch2-results.md（10 轮全过，0 B 类 0 C 类）；批次三见
-> docs/batch3-results.md（c5b PASS；c6a/c6c/c6d/c5a-run2 A 类闭合；c6b 待 run3）。
+## 记录表·批次二补填（10/06 回填；窗长与判读细节见 docs/batch2-results.md）
+
+| 轮   | CSV                            | 判决                          | L_p 均值 (cr/ih/ib/wb/nad/nhd/tx) | 预期                        | 结论 |
+| --- | ------------------------------ | ----------------------------- | --------------------------------- | --------------------------- | --- |
+| c3a | ch5_c3a_mgs_run1.csv           | dominant cr 0.512            | 0.512/0.218/0.313/0.006/0/0/0     | cr 低（对比参照）               | ✓ 对比参照成立：比 c3b 低 4×；fork/exec 垫高基线符合预告 |
+| c3b | ch5_c3b_mgb_run1.csv           | dominant cr **2.059**        | 2.059/0.626/0.980/0.083/0/0/0     | dominant cr 明显抬升           | ✓✓ 工作集转移炸出逐出流：victim_write 7.9×、l3 emem_wr span 15.8×、a72 3.4× |
+| c3c | ch5_c3c_lat1m_run1.csv         | low（cr 0.066）                | 0.066/0/0.008/0/0/0/0             | cr 低                      | ✓ 1MB 链 L2 驻留全静（8.5ns 实测） |
+| c3d | ch5_c3d_lat256m_run1.csv       | dominant cr **0.750**        | 0.750/0.205/0.294/0.002/0/0/0     | dominant cr 明显抬升           | ✓ 11.4× c3c；"深度型负载 cr 绝对值或低于同带宽顺序流"备注成立 |
+| c3e | ch5_c3e_dbit_run1.csv          | dominant cr 0.385            | 0.385/0.105/0.109/0.004/0/0/0     | dominant cr + io 低           | ✓✓ 翻转对完整：io_write 4.8K/s vs c1e 576K/s（120×） |
+| c4a | ch5_c4a_memseq_run1.csv        | dominant cr **1.788**        | 1.788/0.405/0.834/0.010/0/0/0     | dominant cr 流式              | ✓ mem_reads span 0.857、a72 128M/s |
+| c4b | ch5_c4b_memrnd_run1.csv        | dominant cr 0.844            | 0.844/0.177/0.449/0.003/0/0/0     | dominant cr miss 主导         | ✓ 判决；签名细节修订：bypass 6.6×（1.81M→12.0M/s）、ememwr/a72 2.7× |
+| c4c | ch5_c4c_memwr_run1.csv         | dominant cr **1.695**        | 1.695/1.000/1.000/0.001/0/0/0     | dominant cr 或 wb            | ✓ 判决；wb 预期修订：l3_emem_wr 32×（8.6M→275M/s）、victim 288× 跌、ih/ib=1.000 伪影 |
+| c4d | ch5_c4d_fillseq_run1.csv       | low（cr 0.134）                | 0.134/0.081/0.073/0.004/0/0/0     | wb 主导 + io 写               | A 类修订：io_access 484K/s、io_write 76K/s 在动，但 io 域锚点为 Gbps 级 → low 如实 |
+| c4e | ch5_c4e_fillrnd_run1.csv       | low（cr 0.079）                | 0.079/0.052/0.047/0.002/0/0/0     | wb 主导 + io 更高             | A 类修订：io_write 35K/s（< c4d 的 76K/s） |
+
+**批次二判定：闭环通过（10/10=100%，0 B 类 0 C 类，10/5）**——5 轮干净 PASS（c3b/c3c/c3d/c3e/c4a）+ 2 轮判决 PASS 带签名修订（c4b/c4c）+ 3 轮 A 类预期修订（c3a 参照仍成立/c4d/c4e）。
+
+## 记录表·批次三补填（10/06 回填；窗长与判读细节见 docs/batch3-results.md）
+
+| 轮   | CSV                            | 判决                          | L_p 均值 (cr/ih/ib/wb/nad/nhd/tx) | 预期                        | 结论 |
+| --- | ------------------------------ | ----------------------------- | --------------------------------- | --------------------------- | --- |
+| c5a run1 | ch5_c5a_db4x_run1.csv        | low（仅 1 实例跑完）              | —（应用未成形）                        | dominant ib/ih 或 multi       | **C 类**（设计缺陷）：三实例 LOCK 互斥秒死 → 修复重跑 |
+| c5a run2 | ch5_c5a_db4x_run2.csv        | low（cr 0.200 med）             | 0.200 med（全窗；4-way 段另见 §2.2）      | dominant cr 或 multi（修订）     | **A 类**（切片取证闭合）：4-way 段 a72 17.3M/s vs 全窗 3.39M/s=同秒退场稀释 |
+| c5a run3 | ch5_c5a_db4x_run3.csv        | dominant cr **0.797** ✓       | 0.797/0.271/0.206/0.014/0/0/0     | dominant cr 或 multi（修订）     | **PASS**：等时长配平；a72 切片 15.0→12.3→10.0M 随退场递减；64M 缓存=分界刀口（db64 翻转 9.6K→74.2K） |
+| c5b | ch5_c5b_gups4x_run1.csv       | dominant cr **1.791** ✓       | 1.791/0.666/1.000/0.049/0/0/0     | dominant cr/wb              | **PASS**：GUP/s 份额 45.8/29.2/16.7/8.3% 随表尺寸单调下降 |
+| c6a | ch5_c6a_socktcp_run1.csv      | dominant nad 0.287 / ih 0.099 | 0.046/0.099/0.005/0/0.287/0.083/0 | dominant ih（E2 签名）          | **A 类**（准 PASS，头名修订）：en3f1_rx 170.6MB/s≈1.36Gbps；nad 头名与 c2b 谱系一致 |
+| c6b run1 | ch5_c6b_sockudp_run1.csv    | low（app 相位 1s）               | —（零流量）                          | dominant ih                 | **C 类**：sockperf 秒退 → run2 |
+| c6b run2 | ch5_c6b_sockudp_run2.csv    | low（app 相位 1s）               | —（零流量）                          | dominant nad 或 ih           | **C 类**：同秒退 → run3 |
+| c6b run3 | ch5_c6b_sockudp_run3.csv    | dominant nad **0.309** ✓       | 0.032/0.107/0.004/0/0.309/0.092/0 | dominant nad 或 ih（修订）       | **PASS**：UDP 1.48Gbps、pps 126.1K（vs c6a 115.9K） |
+| c6c | ch5_c6c_rndrd_buf_run1.csv    | low（ih 0.051）                 | 0.045/0.051/0.017/0.001/0/0/0     | cr 中度 + ib                 | **A 类**（风险注已预告）：a72 3.67M/s、mem_reads 1.77M/s 在动但锚点域为 Gbps 级 |
+| c6d | ch5_c6d_rndrd_direct_run1.csv | low（ih 0.031）                 | 0.031/0.031/0.004/0/0/0/0         | dominant ib（cr 分量消失）       | **A 类**（风险注已预告）：a72 2.70M/s、io_reads 持平 |
+
+**批次三判定：闭环通过（10/06）**——3 轮干净 PASS（c5b/c6b run3/c5a run3）+ c6a 准 PASS + 3 轮 A 类预期修订（c6c/c6d/c5a run2）+ 2 轮 C 类已定位修复重跑（c5a run1→run3、c6b run1/2→run3）；**0 B 类（引擎缺陷）**。批次三为第五章全部批次的最后一棒。
+
+> **第五章判读总流程 step 5 完成（10/06）**：出图 26 张已入 fig/
+> （ch5_case*_verdict / ch5_case*_<counter> / ch5_case5_*_share，工具
+> tools/gen_ch5_figs.py，风格逐字沿用 9/14 定稿 + 判决向量与上表逐位
+> 一致）；报告入 docs/validation-replay.md §9；本记录表批次二/三回填如上。
+> Case 7（m1-m5）判决与记录见 docs/ch5-case7-opsheet.md + case7-results.md，
+> 其出图（ch5_case7_*）一并由同一工具生成。
 
 ### 批次一补跑块（9/24 开，9/30 闭环）——c2c 主机口径已执行完毕（记录表末行 ch5_c2c_host_run1.csv）
 
