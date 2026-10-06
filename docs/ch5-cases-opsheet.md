@@ -716,6 +716,19 @@ sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run2.csv \
 跑完即查：`cat results/ch5_c6b_sockudp_run2.csv.phase.log`（app 相位应 ≈30s；
 仍为 1s 就把当时的报错原文贴给我）。
 
+> **10/05 二次失败（run2，用户确认走路线② netperf、未动 sockperf）**：app 相位
+> 仍 1s、零流量秒退 → 签名 = netperf 控制连接被拒，**疑 fujian netserver 已死**
+> （9/23 批次 0 所起，设备可能重启过）。run3 前置：fujian 上
+> `pgrep -a netserver || netserver -D -4 &`，确认 12865 监听后先冒烟
+> `netperf -H 192.168.56.11 -t TCP_STREAM -l 2`，再跑 run3（输出名改 run3）：
+
+```bash
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c6b_sockudp_run3.csv \
+  -a "taskset -c 0-3 netperf -H 192.168.56.11 -t UDP_STREAM -l 30 -- -m 1472" -b 0-3 -t 60
+```
+
+回传：`tar czf /tmp/ch5_c6b_run3.tar.gz results/ch5_c6b_sockudp_run3.csv results/ch5_c6b_sockudp_run3.csv.phase.log`
+
 ### ③ 回传（两轮都跑完后）
 
 ```bash
