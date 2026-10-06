@@ -743,6 +743,60 @@ tar czf /tmp/ch5_b3_rerun.tar.gz results/ch5_c5a_db4x_run2.csv \
 
 scp 回本地后贴回，我判读并写 docs/batch3-results.md 闭合批次三。
 
+### ④ c5a run3（可选扩展·等时长配平版，2026-10-06 批准执行）
+
+**为什么做**：run2 已 A 类闭合（38× 梯度 + 切片取证），但判决 low 需要切片
+取证兜底——run2 的"读量按缓存反比配平"配的是公平不是等时长，4-way 并发只撑
+~9s（大缓存实例先跑完退场），全窗 78s 均值被 ~70s 单实例 eMMC 涓流稀释。run3
+把读量改成按实测速率 ×~60s 配平（200K/600K/5.5M/6M），让四路并发撑满整个
+app 窗口，判决直接 visible。判读标准同 run2 修订期望：**dominant cr 或 multi**。
+
+**前置（~3 分钟）**：重建四副本以复现 run2 的页缓存状态——副本是 10/05 做的，
+隔日页缓存大概率已被逐出；cp 本身会把库读进页缓存并制造与 run2 相同的脏页
+回写压力（run2 的 38× 梯度正来自这个压力，读量配平也按当时的速率算的）。
+**不 drop_caches**（同 run2）。rm 先删旧副本，防 cp 把 dbtest 嵌套进子目录。
+
+```bash
+# 1. 重建四副本（~2-4 分钟）
+rm -rf /root/bf2k/data/dbtest_c5a1 /root/bf2k/data/dbtest_c5a2 \
+       /root/bf2k/data/dbtest_c5a3 /root/bf2k/data/dbtest_c5a4
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a1
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a2
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a3
+cp -r /root/bf2k/data/dbtest /root/bf2k/data/dbtest_c5a4
+free -h    # 贴回：available 若 <6G 属内存边缘预期（run2 同况），照跑
+```
+
+```bash
+# 2. 四实例等时长并发读（读量 ≈ 各 60-77s；日志名带 r3 防覆盖 run2 的）
+sudo ./run_phase.sh -c configs/e1_esw.conf -o results/ch5_c5a_db4x_run3.csv \
+  -a "sh -c 'taskset -c 0 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=16777216 --reads=200000 \
+  --db=/root/bf2k/data/dbtest_c5a1 > /tmp/c5ar3_db16.log 2>&1 & \
+  taskset -c 1 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=67108864 --reads=600000 \
+  --db=/root/bf2k/data/dbtest_c5a2 > /tmp/c5ar3_db64.log 2>&1 & \
+  taskset -c 2 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=268435456 --reads=5500000 \
+  --db=/root/bf2k/data/dbtest_c5a3 > /tmp/c5ar3_db256.log 2>&1 & \
+  taskset -c 3 /root/bf2k/bench/bin/db_bench --benchmarks=readrandom --use_existing_db=1 \
+  --num=2000000 --value_size=1000 --cache_size=1073741824 --reads=6000000 \
+  --db=/root/bf2k/data/dbtest_c5a4 > /tmp/c5ar3_db1g.log 2>&1 & \
+  wait'" -b 0-3 -t 240
+
+# 3. 跑完即查（busybox：-n 2 逐个看；四个 log 都应有 readrandom 行）
+for f in /tmp/c5ar3_db16.log /tmp/c5ar3_db64.log /tmp/c5ar3_db256.log /tmp/c5ar3_db1g.log; do echo "== $f"; tail -n 2 $f; done
+cat results/ch5_c5a_db4x_run3.csv.phase.log   # app 相位期望 55-90s；<55s 或 >170s 停下贴给我
+
+# 4. 回传
+tar czf /tmp/ch5_c5a_run3.tar.gz results/ch5_c5a_db4x_run3.csv \
+  results/ch5_c5a_db4x_run3.csv.phase.log \
+  /tmp/c5ar3_db16.log /tmp/c5ar3_db64.log /tmp/c5ar3_db256.log /tmp/c5ar3_db1g.log
+```
+
+scp 回本地后贴回，我判读（期望 dominant cr 或 multi、四路并发撑满 app 窗口；
+若仍 low 按 §8.6 三类诊断，不阻塞）并更新 batch3-results.md 闭合。
+
 ---
 
 ## 判读总流程（Claude 本地，每批次）
