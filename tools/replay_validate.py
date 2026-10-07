@@ -23,6 +23,10 @@ import analyze_bottleneck as ab
 
 RES = ab.ROOT + "\\results"
 MSG = ab.ROOT + "\\message"
+# 2026-09-30 results/ reorganization: the replay inputs moved into the
+# classified subfolders (results/README.md); message/ is unchanged.
+GSERIES = RES + "\\g-series"
+E1SERIES = RES + "\\e1-series"
 
 # app -> (expected busy path, low-load flag, metric, note)
 # metric "med" = argmax of median L (tile-side judgments are
@@ -75,14 +79,20 @@ EXPECT = {
 def runs_of(app):
     if app.startswith("e0_"):
         return [MSG + "\\" + app + ".csv"]
+    if app.startswith("g"):
+        base = GSERIES
+    elif app.startswith("e1_"):
+        base = E1SERIES
+    else:
+        base = RES
     # calibration files are single continuous-load CSVs; e1_n2 has
     # three phase-logged runs like the G series
     if app in ("e1_n0_2a", "e1_n0_2b", "e1_n1_1g", "e1_n1_5g",
                "e1_n1_10g", "e1_n1_20g"):
-        return [RES + "\\" + app + ".csv"]
+        return [base + "\\" + app + ".csv"]
     out = []
     for r in range(1, 4):
-        out.append(RES + "\\%s_run%d.csv" % (app, r))
+        out.append(base + "\\%s_run%d.csv" % (app, r))
     return out
 
 

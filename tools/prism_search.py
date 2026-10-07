@@ -30,6 +30,9 @@ Usage:
     writes PREFIX_mag.dat (per-path median L_p) + PREFIX_dir.dat
     (per-path row wins) + PREFIX.plt (two-panel gnuplot, magnitude
     and direction in one figure) + PREFIX.png
+  prism_search.py <csv...> [--series OUT.tsv]
+    dumps per-row L_p over the app-window rows (row + 7 paths, raw
+    values, no smoothing) for time-series figures
   prism_search.py --selfcheck
     instance set A (17 replays): judgments must reproduce
     replay_validate.py's gate conclusions exactly (regression gate)
@@ -167,6 +170,7 @@ def search(scene, csvs, pipe=None, model=None):
     vglob = {}         # vertex -> {(run id, row): v} over observed rows
     vowners = {}       # vertex -> set of paths that observed it
     napp = 0           # total app rows across runs (P2.5d obs denom)
+    rowseries = {}     # (run id, csv row) -> {path: row L_p} (series dump)
     imax = None
     for rid, path in enumerate(csvs):
         run, out = ab.run_one(path, pipe, paths, vertices, idle_v,
@@ -191,10 +195,12 @@ def search(scene, csvs, pipe=None, model=None):
         for i in run.app_i:
             lp, w = an.row_lp(run, i)
             warns |= set(w)
+            row = {}
             for p, t in lp.items():
                 if t[0] is None:
                     continue
                 rowlp.setdefault(p, []).append(t[0])
+                row[p] = t[0]
                 seen = set()
                 topv, topc = None, -1.0
                 for vname, v, share, label, excl in t[1]:
@@ -226,6 +232,8 @@ def search(scene, csvs, pipe=None, model=None):
                 if topv is not None:
                     rt = rowtop.setdefault(p, {})
                     rt[topv] = rt.get(topv, 0) + 1
+            if row:
+                rowseries[(rid, i)] = row
             for vname in vertices:
                 v, m, label, excl = an.vertex_row(run, i, vname)
                 if label and v is not None:
@@ -368,6 +376,7 @@ def search(scene, csvs, pipe=None, model=None):
             "ranking": [(p, round(v, 3)) for p, v in ranking],
             "decomposition": decomp,
             "attrib": attrib, "lp_row_mean": row_mean,
+            "rowseries": rowseries,
             "grank": grank, "gnote": gnote,
             "warnings": warnings,
             "idle_max": round(imax, 3) if imax is not None else None}
@@ -757,6 +766,7 @@ def main():
     ap.add_argument("--pipe")
     ap.add_argument("--json")
     ap.add_argument("--plot", help="PREFIX for .dat/.plt/.png figure")
+    ap.add_argument("--series", help="dump per-row L_p TSV (row + 7 paths)")
     ap.add_argument("--selfcheck", action="store_true")
     args = ap.parse_args()
 
@@ -777,6 +787,23 @@ def main():
         with open(args.json, "w") as f:
             json.dump(sc, f, ensure_ascii=False, indent=2)
         print("evidence JSON written: %s" % args.json)
+    if args.series:
+        rs = sc.get("rowseries") or {}
+        order = list(paths.keys())
+        # One line per (run, csv row) with a reading; x = the CSV row
+        # index (1 row = 1 s, contiguous within the phase window).
+        # A path absent from the row's lp dict leaves an empty field.
+        with open(args.series, "w") as f:
+            f.write("# per-row L_p over app-window rows (raw, no smoothing)\n")
+            f.write("# row = CSV row index (1 row = 1 s)\n")
+            f.write("row\t" + "\t".join(order) + "\n")
+            for (rid, i) in sorted(rs):
+                cells = []
+                for p in order:
+                    v = rs[(rid, i)].get(p)
+                    cells.append("%.4f" % v if v is not None else "")
+                f.write("%d\t%s\n" % (i, "\t".join(cells)))
+        print("series written: %s (%d rows)" % (args.series, len(rs)))
 
 
 if __name__ == "__main__":

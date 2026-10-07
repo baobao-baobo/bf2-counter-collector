@@ -32,6 +32,25 @@
 #     starts at 1, coarse decade tics); pure CR/IB/WB figures use the
 #     linear e+6 axis - both per the established SPECS decisions.
 #
+#  C) transfer figures (fig/ch5_trans_*.png): the same application
+#     under a parameter sweep, one line per path over the ordered
+#     parameter axis (linespoints) - diverging/crossing lines render
+#     the bottleneck handoff that the per-round bars of A/B cannot
+#     show.  L_p lines reuse the verdict-cache vectors; raw-counter
+#     companions (victim/io/emem/mem_reads) use col_rates
+#     differentials (log axis where the sweep spans decades); the
+#     case-5 knife-edge figure plots the batch-3 ops/s constants
+#     (run2 vs run3 over the cache tiers).
+#
+#  D) per-row series figures (fig/ch5_series_*.png): L_p time series
+#     over the app window for one representative round (PathFinder-
+#     style dynamics), dumped by prism_search --series and smoothed
+#     with a centered 6-row mean - each collector row carries fresh
+#     deltas for exactly one tile group (tile_group cycles 0-5), so
+#     a raw per-row L_p oscillates with period 6 by construction and
+#     the 6-row mean (one full sampling cycle per point) restores
+#     the window-mean semantics as a sliding window.
+#
 # Case 5 adds two throughput-share figures (fig/ch5_case5_*_share.png,
 # one series, % of the per-instance throughput): the per-instance GUP/s
 # and ops/s constants are the adjudicated batch-3 record from
@@ -77,6 +96,13 @@ PATH_COLORS = [
     ("cr", "#4C4C4C"), ("ih", "#BABABA"), ("ib", "#B2172B"), ("wb", "#F5A682"),
     ("nad", "#C1A8E0"), ("nhd", "#F7E6A0"), ("tx", "#9FC5E8"),
 ]
+PATH_COLOR = dict(PATH_COLORS)
+
+# gnuplot pngcairo filled point types, distinct per path, for the
+# transfer-view linespoints figures.
+PATH_PT = {"cr": 7, "ih": 5, "ib": 9, "wb": 11, "nad": 13, "nhd": 15,
+           "tx": 1}
+PT_SEQ = [7, 5, 9, 11, 13, 15, 1]   # assigned in series order to raw figs
 
 # One case per batch; rounds = (short label, results-relative CSV).
 CASES = [
@@ -180,6 +206,121 @@ SHARE_FIGS = [
      "db_bench per-instance ops/s, caches 16M/64M/256M/1G (batch3 S2.6)"),
 ]
 
+# Family C: transfer views.  One line per path over the ordered
+# parameter axis; pts = (case, tlabel) pairs into the verdict cache.
+# L_p values = the adjudicated prism vectors (window-mean median).
+TRANSFER_FIGS = [
+    dict(name="ch5_trans_case1_ramp", xlab="NPB kernel",
+         labels=["EP", "IS", "FT"],
+         pts=[("case1", "EP"), ("case1", "IS"), ("case1", "FT")],
+         paths=["cr", "ih", "ib", "wb"],
+         note="case1 intensity ramp: kernel choice = memory-intensity "
+              "parameter (cr 0.535 -> 1.879)"),
+    dict(name="ch5_trans_case2_direction", xlab="Traffic direction",
+         labels=["net-in", "net-out", "host-out"],
+         pts=[("case2", "net-in"), ("case2", "net-out"),
+              ("case2", "host-out")],
+         paths=["nad", "ih", "nhd", "tx"],
+         note="case2 direction flip: head handoff nad -> nhd/tx"),
+    dict(name="ch5_trans_case3_mg", xlab="MG grid size",
+         labels=["MG-S 32^3", "MG-B 256^3"],
+         pts=[("case3", "MG-S"), ("case3", "MG-B")],
+         paths=["cr", "ih", "ib", "wb"],
+         note="case3 working-set transfer: MG grid 32^3 -> 256^3 "
+              "(cr 0.512 -> 2.059)"),
+    dict(name="ch5_trans_case3_lat", xlab="Pointer chain",
+         labels=["lat-1M", "lat-256M"],
+         pts=[("case3", "lat-1M"), ("case3", "lat-256M")],
+         paths=["cr", "ih", "ib", "wb"],
+         note="case3 latency-depth transfer: 1M -> 256M chain "
+              "(cr 0.066 -> 0.750)"),
+    dict(name="ch5_trans_case3_db", xlab="db_bench cache size",
+         labels=["db-1G", "db-2G"],
+         pts=[("case1", "db-M"), ("case3", "db-2G")],
+         paths=["cr", "ih", "ib", "wb"],
+         note="case3 storage->memory transfer: db_bench readrandom "
+              "cache 1G -> 2G (cr 0.061 -> 0.385)"),
+    dict(name="ch5_trans_case4_mode", xlab="sysbench access mode",
+         labels=["seq-rd", "rnd-rd", "seq-wr"],
+         pts=[("case4", "seq-rd"), ("case4", "rnd-rd"),
+              ("case4", "seq-wr")],
+         paths=["cr", "ih", "ib", "wb"],
+         note="case4 access-mode transfer: seq-rd -> rnd-rd -> seq-wr"),
+    dict(name="ch5_trans_case7_series", xlab="Interference phase",
+         labels=["base", "mem-intf", "withdraw", "flood", "same-core"],
+         pts=[("case7", l) for l in
+              ("base", "mem-intf", "withdraw", "flood", "same-core")],
+         paths=["cr", "ib", "nhd", "tx"],
+         note="case7 victim series: interference injection/withdrawal "
+              "(cr 0.365 -> 0.820 -> 0.355) + flood round"),
+]
+
+# Family C raw-counter companions: col_rates differentials over the
+# parameter axis; log axis where the sweep spans decades.  series =
+# (label, derived key, color).  kind "app" = adjudicated app-level
+# constants (batch3 record) instead of counter differentials.
+RAW_TRANSFER_FIGS = [
+    dict(name="ch5_trans_case3_mg_victim", xlab="MG grid size",
+         labels=["MG-S", "MG-B"],
+         csvs=["ch5-batch2/ch5_c3a_mgs_run1.csv",
+               "ch5-batch2/ch5_c3b_mgb_run1.csv"],
+         series=[("WB", "tile_victim_write", "#F5A682")], log=True,
+         ylab="VICTIM_WRITE differential (counts/s)",
+         note="case3 eviction explosion: victim_write MG-S -> MG-B"),
+    dict(name="ch5_trans_case3_db_io", xlab="db_bench cache size",
+         labels=["db-1G", "db-2G"],
+         csvs=["ch5-batch1/ch5_c1e_dbmiss_run2.csv",
+               "ch5-batch2/ch5_c3e_dbit_run1.csv"],
+         series=[("IH", "tile_io_write", "#BABABA")], log=True,
+         ylab="IO_WRITE differential (counts/s)",
+         note="case3 storage->memory flip: device-view eMMC writes, "
+              "cache 1G -> 2G"),
+    dict(name="ch5_trans_case4_ememwr", xlab="sysbench access mode",
+         labels=["seq-rd", "rnd-rd", "seq-wr"],
+         csvs=["ch5-batch2/ch5_c4a_memseq_run1.csv",
+               "ch5-batch2/ch5_c4b_memrnd_run1.csv",
+               "ch5-batch2/ch5_c4c_memwr_run1.csv"],
+         series=[("CR", "l3_emem_wr_req", "#B2172B")], log=True,
+         ylab="L3 EMEM_WR_REQ differential (counts/s)",
+         note="case4 write-band transfer: emem writes across the modes"),
+    dict(name="ch5_trans_case6_memreads", xlab="Read mechanism",
+         labels=["buffered", "direct"],
+         csvs=["ch5-batch3/ch5_c6c_rndrd_buf_run1.csv",
+               "ch5-batch3/ch5_c6d_rndrd_direct_run1.csv"],
+         series=[("CR", "rd_cr", "#4C4C4C"), ("IH", "rd_ih", "#BABABA"),
+                 ("IB", "rd_ib", "#B2172B")], log=True,
+         ylab="MEMORY_READS split differential (counts/s)",
+         note="case6 mechanism switch: mem_reads cr/ih/ib buffered -> "
+              "direct (477K/77K/757K -> 54K/8.7K/266K)"),
+    dict(name="ch5_trans_case5_knife", xlab="db_bench cache size",
+         labels=["16M", "64M", "256M", "1G"], kind="app", log=True,
+         series=[("run2", "#B2172B"), ("run3", "#F5A682")],
+         app_values=[[2.6e3, 9.6e3, 90.4e3, 98.4e3],
+                     [3.14e3, 74.2e3, 92.1e3, 95.0e3]],
+         ylab="ops/s",
+         note="case5 knife edge: 64M cache flips eMMC->memory regime "
+              "(run2 S2.2 2.6K/9.6K/90.4K/98.4K, run3 S2.6 3.14K/"
+              "74.2K/92.1K/95.0K)"),
+]
+
+# Family D: per-row L_p series over the app window, one representative
+# round per transfer story (PathFinder-style dynamics; smoothed by
+# cycle_mean, see below).
+SERIES_FIGS = [
+    ("ch5_series_c3b_mgb", "case3", "MG-B",
+     "ch5-batch2/ch5_c3b_mgb_run1.csv",
+     "case3 MG-B: eviction-dominated round (cr med 2.059)"),
+    ("ch5_series_c2b_netout", "case2", "net-out",
+     "ch5-batch1/ch5_c2b_netout_run2.csv",
+     "case2 net-out: 30s flood inside the 55s window (nad 1.566)"),
+    ("ch5_series_m4_flood", "case7", "flood",
+     "case7/ch5_m4_busytrans_run1.csv",
+     "case7 flood: network interference on the victim (nhd/tx lit)"),
+    ("ch5_series_c4c_memwr", "case4", "seq-wr",
+     "ch5-batch2/ch5_c4c_memwr_run1.csv",
+     "case4 seq-wr: dual-path round (cr 1.695 + ih 1.000)"),
+]
+
 
 def verdict(case, label, csv_rel):
     """7-path pressure vector for one round (prism_search, cached)."""
@@ -226,7 +367,8 @@ def verdict(case, label, csv_rel):
 def derived(r):
     """M1 entry-ratio splits + byte series, path_data.py formulas."""
     m = {}
-    for c in ("tile_a72_access", "tile_io_access", "tile_memory_reads_bypass",
+    for c in ("tile_a72_access", "tile_io_access", "tile_io_write",
+              "tile_memory_reads_bypass",
               "tile_mem_reads", "tile_victim", "tile_victim_write",
               "l3half0_total_emem_wr_req", "l3half1_total_emem_wr_req",
               "net_rx_bytes", "net_tx_bytes", "pcie0_rx_bytes",
@@ -241,6 +383,7 @@ def derived(r):
     m["rd_ih"] = rest * fr_ih
     m["rd_ib"] = ib
     emem_wr = (m["l3half0_total_emem_wr_req"] + m["l3half1_total_emem_wr_req"])
+    m["l3_emem_wr_req"] = emem_wr
     m["l3_emem_wr_req_cr"] = emem_wr * fr_cr
     m["l3_emem_wr_req_ih"] = emem_wr * fr_ih
     m["tile_victim_cr"] = m["tile_victim"] * fr_cr
@@ -430,12 +573,203 @@ def cluster_lines(name, ylab, labels, values, log, series, scale=1e6):
     return l
 
 
+def transfer_lines(name, ylab, xlab, labels, rows, series, note,
+                   log=False):
+    """plt source for a transfer (parameter-axis lines) figure.
+
+    series = [(label, color, pointtype)].  PathFinder handoff
+    rendering: ordered parameter on x, one linespoints series per
+    path, so diverging/crossing lines show the bottleneck transfer.
+    Style: the 9/14 canon (Arial 16/22/20, border 15 / nomirror,
+    key outside top right horizontal).
+    """
+    if log:
+        ymax = max(v for row in rows for v in row if v > 0) or 1.0
+    else:
+        ymax = max(v for row in rows for v in row if v > 0) or 0.0
+    l = []
+    l.append("# %s.plt - %s." % (name, note))
+    l.append("#")
+    l.append("# Transfer view: one line per path over the ordered")
+    l.append("# parameter axis (linespoints), so the bottleneck")
+    l.append("# handoff between parameter points shows as diverging/")
+    l.append("# crossing lines instead of isolated bars.  Values =")
+    l.append("# prism verdict vectors (fig/.ch5_verdicts.tsv) or")
+    l.append("# col_rates differentials / batch-3 app constants.")
+    l.append("# Style: Arial 16/22/20, border 15 / nomirror, key")
+    l.append("# outside top right horizontal.")
+    l.append("#")
+    l.append("# Data: fig/%s.dat (one row per parameter point)." % name)
+    l.append("#")
+    l.append("# Usage: gnuplot fig/%s.plt   (from the repo root)" % name)
+    l.append("")
+    l.append("set terminal pngcairo size 1200,600 enhanced font 'Arial,16'")
+    l.append("set output 'fig/%s.png'" % name)
+    l.append("")
+    l.append("set ylabel '%s' font 'Arial,22'" % ylab.replace("_", r"\_"))
+    l.append("set xlabel '%s' font 'Arial,22'" % xlab)
+    l.append("")
+    if log:
+        yr, yhi = log_yrange(ymax)
+        l.append("set yrange " + yr)
+        l.append("set logscale y 10")
+        l.append("unset mytics")
+        l.append("set format y '10^{%L}'")
+        l.append('set ytics add ("1" 1)')
+    else:
+        yhi = gfp.nice_lin(ymax * 1.1)
+        l.append("set yrange [0:%g]" % yhi)
+        l.append("set format y '%.1f'")
+        l.append("set ytics %g" % small_tics(yhi))
+    l.append("")
+    l.append("set border 15")
+    l.append("set ytics nomirror")
+    l.append("set xtics nomirror")
+    l.append("")
+    tics = ", ".join("'%s' %d" % (a, i + 1) for i, a in enumerate(labels))
+    l.append("set xtics (%s) font ',20'" % tics)
+    l.append("set xrange [0:%d]" % (len(labels) + 1))
+    l.append("")
+    l.append("set tmargin 4")
+    l.append("set key outside top right horizontal font 'Arial,20'")
+    l.append("")
+    plot = "plot 'fig/%s.dat'" % name
+    for i, (lbl, col, pt) in enumerate(series):
+        # full keywords: gnuplot 6's "pt" abbreviation is ambiguous
+        # between pointtype and pointinterval
+        using = ("using 1:%d with linespoints pointtype %d "
+                 "pointsize 1.3 linewidth 2" % (i + 2, pt))
+        # gnuplot 6.0.4 parser bug: with using 1:N (N>=3) the sequence
+        # "title '...' lc ..." fails with "duplicated or contradicting
+        # arguments"; putting lc BEFORE title parses fine (verified by
+        # bisection 2026-10-08).
+        clause = using + " lc rgb \"%s\" title '%s'" % (col, lbl)
+        if i == 0:
+            plot += " " + clause
+        else:
+            plot += ", \\\n     '' " + clause
+    l.append(plot)
+    l.append("")
+    return l
+
+
+def series_rows(tsv_path):
+    """Read a prism --series TSV -> list of 7-value rows (None =
+    path absent from that row's lp dict)."""
+    rows = []
+    with open(tsv_path) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            p = line.rstrip("\n").split("\t")
+            if len(p) < 2 or p[0] == "row":  # header line
+                continue
+            vals = [float(v) if v != "" else None for v in p[1:8]]
+            rows.append(vals)
+    return rows
+
+
+def cycle_mean(rows, cycle=6):
+    """Centered `cycle`-row mean: one full tile sampling cycle per
+    point.  Each collector row carries fresh deltas for exactly one
+    tile group (tile_group cycles 0-5), so a raw per-row L_p swings
+    with period 6 by construction; the cycle mean restores the
+    window-mean semantics as a sliding window.  Returns [(x, vals)]
+    with x = center row of the window (1 row = 1 s)."""
+    out = []
+    for i in range(0, len(rows) - cycle + 1):
+        win = rows[i:i + cycle]
+        vals = []
+        for k in range(7):
+            xs = [w[k] for w in win if w[k] is not None]
+            vals.append(sum(xs) / len(xs) if xs else None)
+        out.append((i + cycle / 2.0 + 0.5, vals))
+    return out
+
+
+def write_series_dat(name, xs, rows):
+    """rows = per-point value lists (missing = empty field)."""
+    with open(os.path.join(FIGDIR, name + ".dat"), "w") as f:
+        f.write("# %s: col 1 = cycle-mean center row, cols 2.. = paths\n"
+                % name)
+        for x, vals in zip(xs, rows):
+            cells = ["%.4f" % v if v is not None else "" for v in vals]
+            f.write("%.1f %s\n" % (x, " ".join(cells)))
+
+
+def series_lines(name, xlab, npts, rows, series, note):
+    """plt source for a per-row L_p series figure.  One line per path
+    over the app window, cycle-mean smoothed (see cycle_mean); paths
+    whose cycle-mean peak stays below 0.05 are dropped."""
+    ymax = max(v for row in rows for v in row if v is not None)
+    yhi = gfp.nice_lin(ymax * 1.1)
+    l = []
+    l.append("# %s.plt - %s." % (name, note))
+    l.append("#")
+    l.append("# Per-row L_p over the app window, one line per path.")
+    l.append("# Each collector row carries fresh deltas for exactly")
+    l.append("# one tile group (tile_group cycles 0-5), so raw per-row")
+    l.append("# L_p oscillates with period 6 by construction; each")
+    l.append("# point is a centered 6-row mean = one full sampling")
+    l.append("# cycle, restoring the window-mean semantics as a")
+    l.append("# sliding window.  Paths with a cycle-mean peak below")
+    l.append("# 0.05 are dropped from the figure.  Style: Arial")
+    l.append("# 16/22/20, border 15 / nomirror, key outside top right.")
+    l.append("#")
+    l.append("# Data: fig/%s.dat (col 1 = cycle-mean center row)." % name)
+    l.append("#")
+    l.append("# Usage: gnuplot fig/%s.plt   (from the repo root)" % name)
+    l.append("")
+    l.append("set terminal pngcairo size 1200,600 enhanced font 'Arial,16'")
+    l.append("set output 'fig/%s.png'" % name)
+    l.append("")
+    l.append("set ylabel 'Bottleneck pressure L_p' font 'Arial,22'")
+    l.append("set xlabel '%s' font 'Arial,22'" % xlab)
+    l.append("")
+    l.append("set yrange [0:%g]" % yhi)
+    l.append("set format y '%.1f'")
+    l.append("set ytics %g" % small_tics(yhi))
+    l.append("")
+    l.append("set border 15")
+    l.append("set ytics nomirror")
+    l.append("set xtics nomirror")
+    l.append("set xrange [0:%d]" % (npts + 3))
+    step = 10 if npts >= 30 else 5
+    l.append("set xtics %d font ',20'" % step)
+    l.append("")
+    l.append("set tmargin 4")
+    l.append("set key outside top right horizontal font 'Arial,20'")
+    l.append("")
+    plot = "plot 'fig/%s.dat'" % name
+    for i, (lbl, col) in enumerate(series):
+        clause = ("using 1:%d with lines lw 1.6 lc rgb \"%s\" title '%s'"
+                  % (i + 2, col, lbl))
+        if i == 0:
+            plot += " " + clause
+        else:
+            plot += ", \\\n     '' " + clause
+    l.append(plot)
+    l.append("")
+    return l
+
+
 def write_dat(name, labels, rows):
     """rows = list of value lists (one per label)."""
     with open(os.path.join(FIGDIR, name + ".dat"), "w") as f:
         f.write("# %s: one row per round\n" % name)
         for lab, vals in zip(labels, rows):
             f.write(lab + " " + " ".join("%.6g" % v for v in vals) + "\n")
+
+
+def write_dat_idx(name, rows):
+    """rows = list of value lists; col 1 = numeric index (1..n) so the
+    transfer-view linespoints plt can read numeric x (labels are mapped
+    onto indices via set xtics)."""
+    with open(os.path.join(FIGDIR, name + ".dat"), "w") as f:
+        f.write("# %s: col 1 = parameter-point index (labels via xtics)\n"
+                % name)
+        for i, vals in enumerate(rows, 1):
+            f.write("%d %s\n" % (i, " ".join("%.6g" % v for v in vals)))
 
 
 def write_plt(name, lines):
@@ -490,6 +824,73 @@ def main():
         write_plt(name, cluster_lines(
             name, ylab, xlabs, rows, False, [("share", "#B2172B")],
             scale=1.0))
+        run_gnuplot(name)
+        made.append(name)
+
+    # ---- family C: transfer views (parameter-axis lines) -----------
+    csv_of = {}
+    for case, _, rounds in CASES:
+        for lab, csv_rel in rounds:
+            csv_of[(case, lab)] = csv_rel
+    for tf in TRANSFER_FIGS:
+        rows = []
+        for case, tl in tf["pts"]:
+            v = verdict(case, tl, csv_of[(case, tl)])
+            rows.append([v[p] for p in tf["paths"]])
+        series = [(p, PATH_COLOR[p], PATH_PT[p]) for p in tf["paths"]]
+        write_dat_idx(tf["name"], rows)
+        write_plt(tf["name"], transfer_lines(
+            tf["name"], "Bottleneck pressure L_p", tf["xlab"],
+            tf["labels"], rows, series, tf["note"], False))
+        run_gnuplot(tf["name"])
+        made.append(tf["name"])
+    for tf in RAW_TRANSFER_FIGS:
+        if tf.get("kind") == "app":
+            # per-label value lists = transpose of the per-series lists
+            rows = [[vals[i] for vals in tf["app_values"]]
+                    for i in range(len(tf["labels"]))]
+            series = [(lbl, col, PT_SEQ[i])
+                      for i, (lbl, col) in enumerate(tf["series"])]
+        else:
+            data = [derived(path_data.col_rates(os.path.join("results", c)))
+                    for c in tf["csvs"]]
+            rows = [[d[key] for _, key, _ in tf["series"]] for d in data]
+            series = [(lbl, col, PT_SEQ[i])
+                      for i, (lbl, key, col) in enumerate(tf["series"])]
+        write_dat_idx(tf["name"], rows)
+        write_plt(tf["name"], transfer_lines(
+            tf["name"], tf["ylab"], tf["xlab"], tf["labels"], rows,
+            series, tf["note"], tf.get("log", False)))
+        run_gnuplot(tf["name"])
+        made.append(tf["name"])
+
+    # ---- family D: per-row L_p series (PathFinder-style dynamics) --
+    for name, case, label, csv_rel, note in SERIES_FIGS:
+        tsv = os.path.join(FIGDIR, name + "_rows.tsv")
+        subprocess.run(
+            [sys.executable, os.path.join(TOOLS, "prism_search.py"),
+             os.path.join("results", csv_rel), "--scene", label,
+             "--series", tsv],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace")
+        raw = series_rows(tsv)
+        if not raw:
+            print("series %s: no app rows, skipping" % name)
+            continue
+        pts = cycle_mean(raw)
+        keep = [k for k in range(7)
+                if max((p[1][k] for p in pts if p[1][k] is not None),
+                       default=0.0) > 0.05]
+        if not keep:
+            print("series %s: all paths quiet, skipping" % name)
+            continue
+        series = [(PATH_COLORS[k][0], PATH_COLORS[k][1]) for k in keep]
+        xs = [p[0] for p in pts]
+        rows = [[p[1][k] for k in keep] for p in pts]
+        write_series_dat(name, xs, rows)
+        write_plt(name, series_lines(
+            name, "app-window row (6-row cycle-mean center; 1 row = 1 s)",
+            len(pts), rows, series, note))
         run_gnuplot(name)
         made.append(name)
 
