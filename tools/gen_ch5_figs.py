@@ -98,9 +98,11 @@ VERDICT_CACHE = os.path.join(FIGDIR, ".ch5_verdicts.tsv")
 #   2 series  #B2172B / #F5A682
 #   3 series  #82969D / #CC312D / #F7EDCA
 #   4 series  #A4C8D9 / #6C96CC / #B2172B / #F5A682
-#   5+ series Paul Tol "bright" (SRON/EPS/TN/09-002, colourblind-safe,
-#             designed for exactly 7 qualitative series), first k
-#             colors in the fixed order.
+#   5+ series Paul Tol "muted" (SRON/EPS/TN/09-002, colourblind-safe,
+#             designed for 9 series / filled areas), first k colors in
+#             the fixed order.  2026-10-08 v2: the "bright" scheme of
+#             the same note was rejected by the user as too saturated
+#             ("太过艳丽").
 # Colors are assigned to the series in their figure order; the
 # per-path identity colors (cr #4C4C4C etc.) are retired.  The figure
 # writers therefore ignore any color stored in the per-figure spec
@@ -111,19 +113,19 @@ PALETTES = {
     3: ["#82969D", "#CC312D", "#F7EDCA"],
     4: ["#A4C8D9", "#6C96CC", "#B2172B", "#F5A682"],
 }
-TOL_BRIGHT = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE",
-              "#AA3377", "#BBBBBB"]
+TOL_MUTED = ["#CC6677", "#332288", "#DDCC77", "#117733", "#88CCEE",
+             "#882255", "#44AA99"]
 
 
 def palette(n):
     """n-series figure colors per the 2026-10-08 rule."""
     if n >= 5:
-        return TOL_BRIGHT[:n]
+        return TOL_MUTED[:n]
     return PALETTES[n]
 
 
 # Path order for the 7-path verdict stacks (labels only; the colors
-# are palette(7) = Tol bright assigned in this order).
+# are palette(7) = Tol muted assigned in this order).
 PATH_COLORS = ["cr", "ih", "ib", "wb", "nad", "nhd", "tx"]
 
 # gnuplot pngcairo filled point types, distinct per path, for the
