@@ -16,9 +16,8 @@
 # ticks on the left y and bottom x axes only (nomirror, no top/right
 # tics); log figures start at 1 with coarse decade tics only
 # (1, 10, 100, ..., minor tics off).
-# Colors: 2-series figures use #B2172B (left bar, dark) and #F5A682
-# (right bar, light); the 3-series figure keeps dark gray / light
-# gray / red.
+# Colors (2026-10-08 rule, by series count): 1 series #B2172B;
+# 2 series #B2172B / #F5A682; 3 series #82969D / #CC312D / #F7EDCA.
 #
 # Axis setup per figure:
 #   - linear figures: y = value/1e6, ylabel "... (e+6)",
@@ -44,17 +43,17 @@ FIG = sys.argv[1] if len(sys.argv) > 1 else "fig"
 #  series list, log-scale flag)
 SPECS = [
     ("tile_a72_access",           "A72_ACCESS (e+6)",
-     [("CR", "#4C4C4C")], False),
+     [("CR", "#B2172B")], False),
     ("tile_io_access",            "IO_ACCESS (counts/s)",
-     [("IH", "#BABABA")], True),
+     [("IH", "#B2172B")], True),
     ("tile_memory_reads_bypass",  "MEMORY_READS_BYPASS (e+6)",
      [("IB", "#B2172B")], False),
     ("tile_victim_write",         "VICTIM_WRITE (e+6)",
-     [("WB", "#F5A682")], False),
+     [("WB", "#B2172B")], False),
     ("tile_hnf_requests",         "HNF_REQUESTS (counts/s)",
      [("CR", "#B2172B"), ("IH", "#F5A682")], True),
     ("tile_mem_reads",            "MEMORY_READS (counts/s)",
-     [("CR", "#4C4C4C"), ("IH", "#BABABA"), ("IB", "#B2172B")], True),
+     [("CR", "#82969D"), ("IH", "#CC312D"), ("IB", "#F7EDCA")], True),
     ("tile_mem_writes",           "MEMORY_WRITES (counts/s)",
      [("CR", "#B2172B"), ("IH", "#F5A682")], True),
     ("l3_hits",                   "L3 HITS (counts/s)",
@@ -65,8 +64,9 @@ SPECS = [
      [("PCIe0", "#B2172B"), ("PCIe1", "#F5A682")], False),
     # Second batch (2026-09-14): remaining drawable counters.  Shared
     # (multi-path) counters come first with the M1 entry-ratio split and
-    # the 2-series palette; dedicated counters keep their single path
-    # color.  Figures with an IH series stay on the log axis.
+    # the 2-series palette; single-series figures use the 1-series
+    # color #B2172B (2026-10-08).  Figures with an IH series stay on
+    # the log axis.
     ("tile_dir_hit",         "DIR_HIT (counts/s)",
      [("CR", "#B2172B"), ("IH", "#F5A682")], True),
     ("tile_allocate",        "ALLOCATE (counts/s)",
@@ -94,13 +94,13 @@ SPECS = [
     ("l3_total_emem_wr_req", "L3 TOTAL_EMEM_WR_REQ (counts/s)",
      [("CR", "#B2172B"), ("IH", "#F5A682")], True),
     ("tile_a72_read",        "A72_READ (e+6)",
-     [("CR", "#4C4C4C")], False),
+     [("CR", "#B2172B")], False),
     ("tile_io_reads",        "IO_READS (counts/s)",
-     [("IH", "#BABABA")], True),
+     [("IH", "#B2172B")], True),
     ("tile_io_write",        "IO_WRITE (counts/s)",
-     [("IH", "#BABABA")], True),
+     [("IH", "#B2172B")], True),
     ("tile_tso_write",       "TSO_WRITE (counts/s)",
-     [("IH", "#BABABA")], True),
+     [("IH", "#B2172B")], True),
     ("net_traffic",          "Network bytes (e+6)",
      [("RX", "#B2172B"), ("TX", "#F5A682")], False),
 ]

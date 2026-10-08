@@ -14,11 +14,11 @@
 # Stacking forces the linear axis (stacked segments on a log axis are
 # not meaningful): values / 1e6, ylabel "(e+6)", format %.0f, yrange
 # [0 : max total x 1.1 rounded to a nice step], coarse integer tics
-# (1/2/5 x 10^k step, <= ~10 tics).  Segment colors use a palette of
-# their own (user rule 2026-09-14): the stacked figures are
-# composition charts, visually distinct from the side-by-side
-# magnitude charts - light purple #C1A8E0 (bottom, darker) /
-# light yellow #F7E6A0 (top, lighter).
+# (1/2/5 x 10^k step, <= ~10 tics).  Segment colors follow the
+# 2026-10-08 count-based rule: these stacked figures have 2 series,
+# so #B2172B (bottom) / #F5A682 (top) - the former 2-series stacked
+# palette (light purple #C1A8E0 / light yellow #F7E6A0, 2026-09-14)
+# is retired by that rule.
 #
 # Bars are drawn with boxxyerror, whose xlow/xhigh/ylow/yhigh are
 # ABSOLUTE coordinates (not offsets): x = ($0+1) +/- 0.275, ylow =
@@ -42,11 +42,11 @@ FIG = sys.argv[1] if len(sys.argv) > 1 else "fig"
 # Keep in sync with STACK_SPECS in tools/path_data.py.
 SPECS = [
     ("l3_lookups", "L3 HITS + MISSES (e+6)",
-     [("HITS", "#C1A8E0"), ("MISSES", "#F7E6A0")]),
+     [("HITS", "#B2172B"), ("MISSES", "#F5A682")]),
     ("l3_rd_chain", "L3 RD CHAIN: CACHE + EMEM (e+6)",
-     [("CACHE_RD_RES_IN", "#C1A8E0"), ("EMEM_RD_REQ", "#F7E6A0")]),
+     [("CACHE_RD_RES_IN", "#B2172B"), ("EMEM_RD_REQ", "#F5A682")]),
     ("tile_mem_reads_stack", "MEMORY_READS (e+6)",
-     [("VIA_HNF", "#C1A8E0"), ("BYPASS", "#F7E6A0")]),
+     [("VIA_HNF", "#B2172B"), ("BYPASS", "#F5A682")]),
 ]
 
 # Total bar width in x units, split half/half around the bar center

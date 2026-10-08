@@ -23,8 +23,9 @@
 #     tools/gen_fig_plts.py (same BOXWIDTH, x_expr offsets, fonts,
 #     border 15 / nomirror, key outside top right).  Data = the
 #     differenced per-counter rates (app mean - idle mean) computed
-#     by path_data.col_rates on each round's CSV.  Dedicated counters
-#     keep their single path color; shared counters carry the M1
+#     by path_data.col_rates on each round's CSV.  Figure colors
+#     follow the 2026-10-08 count-based rule (palette(), below), not
+#     path identity; shared counters carry the M1
 #     entry-ratio split (A72_ACCESS : IO_ACCESS, same formulas as
 #     tools/path_data.py: rd_cr/rd_ih/rd_ib for tile_mem_reads,
 #     l3half0+l3half1 totals split for the L3 chain, tile_victim
@@ -91,12 +92,39 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 
 VERDICT_CACHE = os.path.join(FIGDIR, ".ch5_verdicts.tsv")
 
-# Path -> color map for the verdict stacks (see module docstring).
-PATH_COLORS = [
-    ("cr", "#4C4C4C"), ("ih", "#BABABA"), ("ib", "#B2172B"), ("wb", "#F5A682"),
-    ("nad", "#C1A8E0"), ("nhd", "#F7E6A0"), ("tx", "#9FC5E8"),
-]
-PATH_COLOR = dict(PATH_COLORS)
+# 2026-10-08 user rule: figure colors are chosen by the NUMBER of
+# series in the figure, not by path identity:
+#   1 series  #B2172B (the darker of the original pair)
+#   2 series  #B2172B / #F5A682
+#   3 series  #82969D / #CC312D / #F7EDCA
+#   4 series  #A4C8D9 / #6C96CC / #B2172B / #F5A682
+#   5+ series Paul Tol "bright" (SRON/EPS/TN/09-002, colourblind-safe,
+#             designed for exactly 7 qualitative series), first k
+#             colors in the fixed order.
+# Colors are assigned to the series in their figure order; the
+# per-path identity colors (cr #4C4C4C etc.) are retired.  The figure
+# writers therefore ignore any color stored in the per-figure spec
+# tuples (cluster/transfer/series specs still carry legacy hexes).
+PALETTES = {
+    1: ["#B2172B"],
+    2: ["#B2172B", "#F5A682"],
+    3: ["#82969D", "#CC312D", "#F7EDCA"],
+    4: ["#A4C8D9", "#6C96CC", "#B2172B", "#F5A682"],
+}
+TOL_BRIGHT = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE",
+              "#AA3377", "#BBBBBB"]
+
+
+def palette(n):
+    """n-series figure colors per the 2026-10-08 rule."""
+    if n >= 5:
+        return TOL_BRIGHT[:n]
+    return PALETTES[n]
+
+
+# Path order for the 7-path verdict stacks (labels only; the colors
+# are palette(7) = Tol bright assigned in this order).
+PATH_COLORS = ["cr", "ih", "ib", "wb", "nad", "nhd", "tx"]
 
 # gnuplot pngcairo filled point types, distinct per path, for the
 # transfer-view linespoints figures.
@@ -467,14 +495,15 @@ def stacked_lines(name, ylab, labels, values, note, series):
     l.append("set tmargin 4")
     l.append("set key outside top right horizontal font 'Arial,20'")
     l.append("")
-    for i, (lbl, col) in enumerate(series):
-        l.append("C%d = \"%s\"   # %s" % (i, col, lbl))
+    cols = palette(n)
+    for i, (lbl, _) in enumerate(series):
+        l.append("C%d = \"%s\"   # %s" % (i, cols[i], lbl))
     l.append("")
     # cumulative column sums S_1..S_n of the data columns 2..n+1
     acc = ["$%d" % (i + 2) + "".join("+$%d" % (j + 2) for j in range(i))
            for i in range(n)]
     plot = "plot 'fig/%s.dat'" % name
-    for i, (lbl, col) in enumerate(series):
+    for i, (lbl, _) in enumerate(series):
         lo = acc[i - 1] if i else "0"
         hi = acc[i]
         using = ("using ($0+1):((%s) > (%s) ? (%s) : 1/0):"
@@ -553,11 +582,12 @@ def cluster_lines(name, ylab, labels, values, log, series, scale=1e6):
     l.append("set tmargin 4")
     l.append("set key outside top right horizontal font 'Arial,20'")
     l.append("")
-    for lbl, col in series:
-        l.append("C_%s = \"%s\"" % (lbl.replace("PCIe", "PCIE"), col))
+    cols = palette(n)
+    for i, (lbl, _) in enumerate(series):
+        l.append("C_%s = \"%s\"" % (lbl.replace("PCIe", "PCIE"), cols[i]))
     l.append("")
     plot = "plot 'fig/%s.dat'" % name
-    for i, (lbl, col) in enumerate(series):
+    for i, (lbl, _) in enumerate(series):
         key = "C_%s" % lbl.replace("PCIe", "PCIE")
         if log:
             using = "using %s:%d" % (gfp.x_expr(i, n), i + 2)
@@ -634,7 +664,8 @@ def transfer_lines(name, ylab, xlab, labels, rows, series, note,
     l.append("set key outside top right horizontal font 'Arial,20'")
     l.append("")
     plot = "plot 'fig/%s.dat'" % name
-    for i, (lbl, col, pt) in enumerate(series):
+    cols = palette(len(series))
+    for i, (lbl, _col, pt) in enumerate(series):
         # full keywords: gnuplot 6's "pt" abbreviation is ambiguous
         # between pointtype and pointinterval
         using = ("using 1:%d with linespoints pointtype %d "
@@ -643,7 +674,7 @@ def transfer_lines(name, ylab, xlab, labels, rows, series, note,
         # "title '...' lc ..." fails with "duplicated or contradicting
         # arguments"; putting lc BEFORE title parses fine (verified by
         # bisection 2026-10-08).
-        clause = using + " lc rgb \"%s\" title '%s'" % (col, lbl)
+        clause = using + " lc rgb \"%s\" title '%s'" % (cols[i], lbl)
         if i == 0:
             plot += " " + clause
         else:
@@ -741,9 +772,10 @@ def series_lines(name, xlab, npts, rows, series, note):
     l.append("set key outside top right horizontal font 'Arial,20'")
     l.append("")
     plot = "plot 'fig/%s.dat'" % name
-    for i, (lbl, col) in enumerate(series):
+    cols = palette(len(series))
+    for i, (lbl, _) in enumerate(series):
         clause = ("using 1:%d with lines lw 1.6 lc rgb \"%s\" title '%s'"
-                  % (i + 2, col, lbl))
+                  % (i + 2, cols[i], lbl))
         if i == 0:
             plot += " " + clause
         else:
@@ -794,12 +826,12 @@ def main():
         # verdict stack
         verdicts = [verdict(case, lab, csv_rel) for lab, csv_rel in rounds]
         name = "ch5_%s_verdict" % case
-        rows = [[v[k] for k, _ in PATH_COLORS] for v in verdicts]
+        rows = [[v[k] for k in PATH_COLORS] for v in verdicts]
         write_dat(name, labels, rows)
         write_plt(name, stacked_lines(
             name, "Bottleneck pressure L_p", labels, rows,
             "%s - stacked 7-path pressures per round" % case_note,
-            PATH_COLORS))
+            [(p, None) for p in PATH_COLORS]))
         run_gnuplot(name)
         made.append(name)
         # per-round derived counter data
@@ -837,7 +869,7 @@ def main():
         for case, tl in tf["pts"]:
             v = verdict(case, tl, csv_of[(case, tl)])
             rows.append([v[p] for p in tf["paths"]])
-        series = [(p, PATH_COLOR[p], PATH_PT[p]) for p in tf["paths"]]
+        series = [(p, None, PATH_PT[p]) for p in tf["paths"]]
         write_dat_idx(tf["name"], rows)
         write_plt(tf["name"], transfer_lines(
             tf["name"], "Bottleneck pressure L_p", tf["xlab"],
@@ -884,7 +916,7 @@ def main():
         if not keep:
             print("series %s: all paths quiet, skipping" % name)
             continue
-        series = [(PATH_COLORS[k][0], PATH_COLORS[k][1]) for k in keep]
+        series = [(PATH_COLORS[k], None) for k in keep]
         xs = [p[0] for p in pts]
         rows = [[p[1][k] for k in keep] for p in pts]
         write_series_dat(name, xs, rows)
