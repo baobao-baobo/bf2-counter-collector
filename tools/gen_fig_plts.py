@@ -17,7 +17,8 @@
 # tics); log figures start at 1 with coarse decade tics only
 # (1, 10, 100, ..., minor tics off).
 # Colors (2026-10-08 rule, by series count): 1 series #B2172B;
-# 2 series #B2172B / #F5A682; 3 series #82969D / #CC312D / #F7EDCA.
+# 2 series #B2172B / #F5A682; 3 series #C6B3D3 / #ED9F9B / #80BA8A
+# (the user's pastel family, v3, first 3 of 5).
 #
 # Axis setup per figure:
 #   - linear figures: y = value/1e6, ylabel "... (e+6)",
@@ -53,7 +54,7 @@ SPECS = [
     ("tile_hnf_requests",         "HNF_REQUESTS (counts/s)",
      [("CR", "#B2172B"), ("IH", "#F5A682")], True),
     ("tile_mem_reads",            "MEMORY_READS (counts/s)",
-     [("CR", "#82969D"), ("IH", "#CC312D"), ("IB", "#F7EDCA")], True),
+     [("CR", "#C6B3D3"), ("IH", "#ED9F9B"), ("IB", "#80BA8A")], True),
     ("tile_mem_writes",           "MEMORY_WRITES (counts/s)",
      [("CR", "#B2172B"), ("IH", "#F5A682")], True),
     ("l3_hits",                   "L3 HITS (counts/s)",

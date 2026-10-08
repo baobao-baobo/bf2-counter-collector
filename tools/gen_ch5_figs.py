@@ -98,11 +98,15 @@ VERDICT_CACHE = os.path.join(FIGDIR, ".ch5_verdicts.tsv")
 #   2 series  #B2172B / #F5A682
 #   3 series  #82969D / #CC312D / #F7EDCA
 #   4 series  #A4C8D9 / #6C96CC / #B2172B / #F5A682
-#   5+ series Paul Tol "muted" (SRON/EPS/TN/09-002, colourblind-safe,
-#             designed for 9 series / filled areas), first k colors in
-#             the fixed order.  2026-10-08 v2: the "bright" scheme of
-#             the same note was rejected by the user as too saturated
-#             ("太过艳丽").
+#   3-5 series: the user's pastel family (2026-10-08 v3), first k
+#             colors in the fixed order
+#             #C6B3D3 / #ED9F9B / #80BA8A / #9CD1CB / #6BB7CA.
+#   6-7 series: the family is extended with a soft yellow and a
+#             neutral gray (positions 6-7) so the 6-line series
+#             figures and the 7-segment verdict stacks keep seven
+#             distinguishable fills (Claude's harmonized extras).
+#   v2 history: Tol "bright" (rejected as too saturated), then Tol
+#   "muted" (superseded by the user's own family).
 # Colors are assigned to the series in their figure order; the
 # per-path identity colors (cr #4C4C4C etc.) are retired.  The figure
 # writers therefore ignore any color stored in the per-figure spec
@@ -110,22 +114,22 @@ VERDICT_CACHE = os.path.join(FIGDIR, ".ch5_verdicts.tsv")
 PALETTES = {
     1: ["#B2172B"],
     2: ["#B2172B", "#F5A682"],
-    3: ["#82969D", "#CC312D", "#F7EDCA"],
-    4: ["#A4C8D9", "#6C96CC", "#B2172B", "#F5A682"],
 }
-TOL_MUTED = ["#CC6677", "#332288", "#DDCC77", "#117733", "#88CCEE",
-             "#882255", "#44AA99"]
+# user pastel family + the two harmonized extras
+PASTELS = ["#C6B3D3", "#ED9F9B", "#80BA8A", "#9CD1CB", "#6BB7CA",
+           "#F2E5AC", "#C9CBCE"]
 
 
 def palette(n):
     """n-series figure colors per the 2026-10-08 rule."""
-    if n >= 5:
-        return TOL_MUTED[:n]
+    if n >= 3:
+        return PASTELS[:n]
     return PALETTES[n]
 
 
 # Path order for the 7-path verdict stacks (labels only; the colors
-# are palette(7) = Tol muted assigned in this order).
+# are palette(7) = pastel family + soft yellow/gray extras, assigned
+# in this order).
 PATH_COLORS = ["cr", "ih", "ib", "wb", "nad", "nhd", "tx"]
 
 # gnuplot pngcairo filled point types, distinct per path, for the
